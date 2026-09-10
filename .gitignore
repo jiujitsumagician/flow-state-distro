@@ -4,3 +4,7 @@ bootstrap.log
 node_modules/
 __pycache__/
 *.pyc
+
+# ISO build workspace — never committed
+iso/cache/
+iso/build/
