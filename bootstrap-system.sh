@@ -89,3 +89,9 @@ say "04: installing flow-state-autoscroll daemon"
 bash "$HERE/scripts/install-autoscroll.sh"
 
 say "system layer complete"
+
+say "10: ProtonVPN client (best-effort)"
+bash "$HERE/scripts/10-vpn.sh" || echo "  (ProtonVPN install skipped; install later with: sudo bash scripts/10-vpn.sh)"
+
+say "11: file-manager thumbnails (system)"
+bash "$HERE/scripts/11-thumbnails.sh"

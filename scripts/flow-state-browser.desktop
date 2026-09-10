@@ -1,0 +1,22 @@
+[Desktop Entry]
+Version=1.0
+Name=Flow State Browser
+GenericName=Web Browser
+Comment=Chrome-based browser with Flow State identity, always-restore tabs, and ProtonVPN toggle
+Exec=/home/will/.local/bin/flow-state-browser %U
+Terminal=false
+Type=Application
+Icon=flow-state
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml_xml;image/webp;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+StartupWMClass=Flow-State-Browser
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=/home/will/.local/bin/flow-state-browser --new-window
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec=/home/will/.local/bin/flow-state-browser --incognito

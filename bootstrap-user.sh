@@ -45,4 +45,13 @@ bash "$SCRIPTS/06-terminal-welcome.sh"
 say "07: per-monitor sleep buttons"
 bash "$SCRIPTS/07-monitor-sleep.sh"
 
+say "08: DSIO tray"
+bash "$SCRIPTS/08-tray.sh"
+
+say "09: Flow State Browser"
+bash "$SCRIPTS/09-browser.sh"
+
+say "11: file-manager thumbnails (user)"
+bash "$SCRIPTS/11-thumbnails.sh"
+
 say "user layer complete. Open a fresh terminal and type: dsio"

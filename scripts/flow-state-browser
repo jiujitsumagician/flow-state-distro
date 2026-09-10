@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Flow State Browser — Google Chrome with a permanent Flow State profile.
+#
+# What we get that plain Chrome doesn't:
+#   * A dedicated user-data-dir at ~/.config/flow-state-browser, so this
+#     browser's tabs and sessions never mix with your other Chrome
+#     profiles or vice-versa.
+#   * "Continue where you left off" burned into the profile on first run
+#     — every launch reopens every tab from the last session, with the
+#     "session restore" bubble suppressed so it just happens.
+#   * A Flow State identity: the FS icon in the launcher and the app
+#     title.
+#
+# What we keep from Chrome:
+#   * Incognito (Ctrl+Shift+N).
+#   * Google account sign-in and Chrome Sync.
+#   * All Chrome extensions.
+#   * DevTools, PWAs, the whole feature set.
+
+set -euo pipefail
+
+USER_DIR="$HOME/.config/flow-state-browser"
+PREFS="$USER_DIR/Default/Preferences"
+
+# First-launch bootstrap: create the profile dir and pre-write the
+# preferences that always-restore requires. Chrome merges over anything
+# it finds on disk, so seeding these once is enough for the setting to
+# stick from the very first tab.
+mkdir -p "$USER_DIR/Default"
+
+if [[ ! -f "$PREFS" ]]; then
+  cat > "$PREFS" <<'EOF'
+{
+  "browser": {
+    "check_default_browser": false,
+    "has_seen_welcome_page": true
+  },
+  "session": {
+    "restore_on_startup": 1,
+    "restore_on_startup_migrated": true,
+    "startup_urls": []
+  },
+  "profile": {
+    "exit_type": "Normal",
+    "exited_cleanly": true,
+    "name": "Flow State"
+  },
+  "first_run_tabs": [],
+  "extensions": {
+    "ui": { "developer_mode": false }
+  },
+  "sync_promo": { "startup_count": 999 },
+  "signin": { "allowed_on_next_startup": true }
+}
+EOF
+fi
+
+# Force "Continue where you left off" every launch, even if a previous run
+# somehow rewrote it. Chrome reads this on every start.
+if command -v jq >/dev/null 2>&1; then
+  tmp="$(mktemp)"
+  jq '.session.restore_on_startup = 1' "$PREFS" > "$tmp" && mv "$tmp" "$PREFS"
+fi
+
+# Pick a Chrome binary — prefer google-chrome (Chrome), fall back to chromium.
+CHROME=""
+for c in google-chrome-stable google-chrome chromium chromium-browser; do
+  if command -v "$c" >/dev/null 2>&1; then
+    CHROME="$(command -v "$c")"
+    break
+  fi
+done
+if [[ -z "$CHROME" ]]; then
+  echo "flow-state-browser: no chrome/chromium binary found. Install google-chrome-stable." >&2
+  exit 1
+fi
+
+# Flow State Browser launch flags. Middle-click autoscroll is served by the
+# system-wide flow-state-autoscroll daemon, so we don't need the browser's
+# own MiddleClickAutoscroll flag.
+exec "$CHROME" \
+  --user-data-dir="$USER_DIR" \
+  --class="Flow-State-Browser" \
+  --restore-last-session \
+  --disable-features=SessionCrashedBubble \
+  "$@"

@@ -36,8 +36,75 @@ from gi.repository import Gtk, GLib, AyatanaAppIndicator3 as AppIndicator3  # no
 
 DSIO_HARNESS = os.path.expanduser("~/dsio-harness")
 CLI = os.path.join(DSIO_HARNESS, "dist/src/cli/index.js")
-BRAND_LOGO = os.path.expanduser("~/flow-state-distro/branding/flowstate-logo.png")
+# Icon name, not a path: the hicolor icon theme (see 05-branding.sh /
+# install-icons in this distro) ships `flow-state` at every panel size,
+# so gnome-shell can pick the right one. A 500px raw PNG passed as a
+# path renders as invisible on some panel implementations.
+ICON_NAME = "flow-state"
 POLL_SECONDS = 15
+
+
+# ---- ProtonVPN toggle helpers ------------------------------------------
+def _which(cmd: str) -> str | None:
+    for p in os.environ.get("PATH", "").split(":"):
+        full = os.path.join(p, cmd)
+        if os.access(full, os.X_OK):
+            return full
+    return None
+
+
+def vpn_probe() -> dict:
+    """Return the current ProtonVPN state: which backend is available and
+    whether we're connected right now.
+    """
+    # Preferred: Proton's own CLI.
+    proton = _which("protonvpn") or _which("protonvpn-cli") or _which("proton-vpn-cli")
+    if proton:
+        try:
+            r = subprocess.run(
+                [proton, "status"], timeout=4,
+                capture_output=True, text=True,
+            )
+            connected = "Connected" in (r.stdout or "") or "connected to" in (r.stdout or "").lower()
+            return {"backend": "protonvpn", "bin": proton, "connected": connected, "installed": True}
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return {"backend": "protonvpn", "bin": proton, "connected": False, "installed": True}
+    # Fallback: NetworkManager VPN connection named "protonvpn" (from a
+    # WireGuard config Will imports manually).
+    nmcli = _which("nmcli")
+    if nmcli:
+        try:
+            r = subprocess.run([nmcli, "-t", "-f", "NAME,TYPE,STATE", "con", "show", "--active"],
+                               timeout=3, capture_output=True, text=True)
+            for line in (r.stdout or "").splitlines():
+                if "proton" in line.lower() and (":vpn:" in line or ":wireguard:" in line):
+                    return {"backend": "nmcli", "bin": nmcli, "connected": True, "installed": True}
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+        return {"backend": "nmcli", "bin": nmcli, "connected": False, "installed": True}
+    return {"backend": None, "bin": None, "connected": False, "installed": False}
+
+
+def vpn_toggle() -> None:
+    state = vpn_probe()
+    if not state["installed"]:
+        subprocess.Popen([
+            "notify-send", "-u", "critical",
+            "Flow State VPN",
+            "ProtonVPN is not installed yet. Run:\n  sudo apt install proton-vpn-gnome-desktop\nor import a Proton WireGuard config in Settings → Network.",
+        ])
+        return
+    if state["backend"] == "protonvpn":
+        if state["connected"]:
+            subprocess.Popen([state["bin"], "disconnect"])
+        else:
+            subprocess.Popen([state["bin"], "connect", "--fastest", "-p", "wireguard"])
+    elif state["backend"] == "nmcli":
+        if state["connected"]:
+            # Bring down the first proton-flavored connection.
+            subprocess.run([state["bin"], "con", "down", "id", "protonvpn"], check=False)
+        else:
+            subprocess.run([state["bin"], "con", "up", "id", "protonvpn"], check=False)
 
 
 def dsio_quota() -> dict:
@@ -100,14 +167,15 @@ def health_hint(data: dict) -> str:
 
 class Tray:
     def __init__(self):
-        icon = BRAND_LOGO if os.path.exists(BRAND_LOGO) else "utilities-system-monitor"
         self.indicator = AppIndicator3.Indicator.new(
             "flow-state-dsio",
-            icon,
+            ICON_NAME,
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         self.indicator.set_title("Flow State — DSIO status")
+        # An attention icon that catches the eye if a provider goes red.
+        self.indicator.set_attention_icon_full(ICON_NAME, "attention")
         self.menu = Gtk.Menu()
         self._menu_items: list[Gtk.MenuItem] = []
         self._rebuild_menu({"loading": True})
@@ -142,9 +210,13 @@ class Tray:
                 parts.append("X ok" if available else "X ⚠")
             elif name == "ollama":
                 parts.append("O ok" if available else "O ⚠")
+        # Prepend VPN state so it's visible at a glance in the label.
+        vpn = vpn_probe()
+        if vpn["installed"]:
+            parts.insert(0, "🔒 on" if vpn["connected"] else "🔓")
         if not parts:
             parts = ["DSIO"]
-        self.indicator.set_label("  ".join(parts[:3]), "flow-state-dsio")
+        self.indicator.set_label("  ".join(parts[:4]), "flow-state-dsio")
 
     def _rebuild_menu(self, data: dict) -> None:
         for it in self._menu_items:
@@ -177,6 +249,19 @@ class Tray:
                 if confidence and not available:
                     bits.append(str(confidence))
                 self._append(Gtk.MenuItem(label="  ".join(bits)))
+
+        self._append(Gtk.SeparatorMenuItem())
+
+        # ProtonVPN toggle — always shown, adapts to backend state.
+        vpn = vpn_probe()
+        if not vpn["installed"]:
+            vpn_item = Gtk.MenuItem(label="🔓 Install ProtonVPN…")
+        elif vpn["connected"]:
+            vpn_item = Gtk.MenuItem(label="🔒 Disconnect ProtonVPN")
+        else:
+            vpn_item = Gtk.MenuItem(label="🔓 Connect ProtonVPN (fastest)")
+        vpn_item.connect("activate", lambda _i: vpn_toggle())
+        self._append(vpn_item)
 
         self._append(Gtk.SeparatorMenuItem())
 
