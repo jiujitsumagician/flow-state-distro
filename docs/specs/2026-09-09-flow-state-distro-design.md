@@ -3,7 +3,7 @@
 **Date:** 2026-09-09
 **Base:** Ubuntu 24.04.4 LTS (Noble Numbat) — matches this machine
 **Author:** Claude Opus 4.7, with Will
-**Status:** Draft (pending Codex review)
+**Status:** Draft v2 (Codex-reviewed)
 
 ## 1. Goal
 
@@ -15,11 +15,12 @@ Concretely, Flow State must:
 
 1. Ship Ubuntu 24.04 with a Flow State identity (name, logo, wallpaper, splash,
    accent color) instead of the Ubuntu-orange defaults.
-2. Come with the DSIO agent harness preinstalled — the same repo Will uses on
-   Windows via `irm https://dsio.io/install.ps1 | iex`, but built into the OS
-   image so the first `dsio` command works after a `dsio login`.
+2. Come with the DSIO agent harness bootstrapper preinstalled — the same shape
+   as `irm https://dsio.io/install.ps1 | iex` on Windows, but hosted at
+   `dsio.io/install.sh` and invoked from a first-login helper on Flow State.
+   Post-install: type `dsio login` once, everything comes down.
 3. Fix middle-click **autoscroll** (hold middle mouse button, drag to scroll)
-   on webpages by default. Broken today on this machine.
+   *system-wide* — browsers, LibreOffice, Nautilus, terminals, snap apps.
 4. Reuse the Flow State brand from `jiujitsumagician/flowstate` — same logo,
    same blue as the tournament app, so all Flow State surfaces feel like one
    product line.
@@ -32,8 +33,8 @@ small.
 
 Phase 1 ships fast and de-risks Phase 2. Phase 2 is the shareable artifact.
 
-**Phase 1 — reprovisioning scripts.** A single `bootstrap.sh` that turns a
-fresh Ubuntu 24.04 install into Flow State. No ISO yet. This gets us:
+**Phase 1 — reprovisioning scripts.** A `bootstrap.sh` that turns a fresh
+Ubuntu 24.04 install into Flow State. No ISO yet. This gets us:
 
 - A repeatable, versioned definition of "what Flow State is."
 - Fast iteration — every change is one script run away.
@@ -41,89 +42,85 @@ fresh Ubuntu 24.04 install into Flow State. No ISO yet. This gets us:
 - Immediate value: Will can rerun it on this machine to keep the harness
   fresh, and re-run it on any Ubuntu box.
 
-**Phase 2 — ISO build.** Wrap Phase 1 into an installable `.iso` using
-Cubic (see §5). The ISO is a shareable Ubuntu-based remix that anyone can
-flash and install; the installer's first-boot hook runs `bootstrap.sh` to
-personalize per user.
+**Phase 2 — ISO build.** Wrap Phase 1 into an installable `.iso` using a
+scripted `unsquashfs → chroot → mksquashfs → xorriso` pipeline (see §5).
+The ISO is a shareable Ubuntu-based remix that anyone can flash and
+install; the installer's first-boot hook runs the user-scope part of
+`bootstrap.sh` to personalize per user.
 
-## 3. Phase 1 — `bootstrap.sh`
+**Split now, not later** (Codex C.6). Phase 1 is authored as two
+entrypoints from the start, both invoked by the top-level `bootstrap.sh`:
 
-**Repo layout** (new: `~/flow-state-distro/`, later `jiujitsumagician/flow-state-distro`):
+- `bootstrap-system.sh` — apt packages, Node source, Ollama service,
+  daemon `.deb` install, system-wide branding hooks. Runs as root.
+  Same script the ISO chroot will run.
+- `bootstrap-user.sh` — DSIO harness clone/build under `$HOME`, `dsio`
+  shim on PATH, MCP register, per-user branding (wallpaper, accent),
+  welcome banner. Runs as the login user. Same script the ISO's
+  first-login hook will run.
+
+## 3. Phase 1 — repo layout
 
 ```
 flow-state-distro/
-  bootstrap.sh              # entrypoint; idempotent; safe to re-run
-  scripts/
-    01-apt-packages.sh      # base packages (nodejs, git, gh, curl, jq, ...)
-    02-nodejs.sh            # Node 24 via NodeSource (harness engines >=24)
-    03-dsio-harness.sh      # clone + build + shim + MCP register
-    04-autoscroll.sh        # Firefox user.js + Chrome .desktop override
-    05-branding.sh          # wallpaper, gsettings accent, avatar
-    06-terminal-welcome.sh  # first-login "type `dsio` here" nudge
+  bootstrap.sh              # top-level entrypoint; calls the two below
+  bootstrap-system.sh       # root-scope work (Phase 1 + ISO chroot re-use this)
+  bootstrap-user.sh         # user-scope work (Phase 1 + first-login re-use this)
+  scripts/                  # step scripts sourced by both entrypoints
+    01-apt-packages.sh
+    02-nodejs.sh
+    03-dsio-harness.sh
+    04-autoscroll.sh
+    05-branding.sh
+    06-terminal-welcome.sh
+  packages/                 # Debian packaging tree (Phase 1.5)
+    flow-state-autoscroll/  # .deb wrapping the daemon + systemd unit
+    flow-state-branding/    # .deb wrapping wallpapers + Plymouth + GRUB theme
   branding/
-    flowstate-logo.png      # from jiujitsumagician/flowstate/public
-    wallpaper-1440p.png     # generated
-    wallpaper-4k.png        # generated
-    os-release              # ID=flowstate PRETTY_NAME="Flow State"
-    plymouth/               # boot splash (Phase 2 uses this)
-    grub/                   # boot menu theme (Phase 2)
+    flowstate-logo.png
+    wallpaper-*.png
+    plymouth/
+    grub/
+  iso/                      # Phase 2 build recipe
+    build-iso.sh
+    manifest.yaml
   README.md
 ```
 
-**What `bootstrap.sh` does, in order:**
+**Ordered steps** (each script idempotent; re-run is a no-op):
 
-1. **Preflight:** confirm Ubuntu 24.04, refuse otherwise. Refresh `apt`.
-2. **APT packages:** `git`, `gh`, `curl`, `jq`, `build-essential`, `xdotool`,
-   `dconf-cli`, `imagemagick` (for branding), `neovim`, `htop`, `tmux`.
-3. **Node 24:** install from NodeSource (`setup_24.x`) if `node -v` is not
-   `>=24`. Today's machine has Node 22 and the harness builds fine on 22, so
-   this is defensive — the harness declares `engines: >=24` and future
-   dependencies may enforce it.
-4. **Global npm CLIs:** `@anthropic-ai/claude-code`, `@openai/codex` (skip if
-   already present).
-5. **Ollama:** install via the upstream script (`curl https://ollama.com/install.sh | sh`)
-   unless already present. Pull `qwen2.5-coder:14b` if VRAM ≥16GB, else `:7b`.
-   Enable systemd service.
-6. **DSIO harness:**
-   - Clone `git@github.com:jiujitsumagician/dsio.git` (or `gh repo clone`) to
-     `~/dsio-harness`. Update via `git pull` if already cloned.
-   - `npm install --no-audit --no-fund && npm run build`.
-   - Copy `.env.example` → `.env` if missing.
-   - Write `~/.local/bin/dsio` shim (bash exec node …/dsio/index.js).
-   - Register user-scope MCP: `claude mcp add --scope user dsio -- node --no-warnings /home/$USER/dsio-harness/dist/src/cli/index.js serve`.
-7. **Autoscroll fix:**
-   - Firefox: write `user.js` with `general.autoScroll=true` into every profile
-     under `~/snap/firefox/common/.mozilla/firefox/*.default*/` and
-     `~/.mozilla/firefox/*.default*/`.
-   - Chrome: place `~/.local/share/applications/google-chrome.desktop` with
-     `--enable-features=MiddleClickAutoscroll` in the Exec line.
-   - Both changes require a browser restart to take effect; script prints a
-     one-line hint.
-8. **Branding:**
-   - Copy `branding/wallpaper-*.png` to `~/.local/share/backgrounds/`.
-   - `gsettings set org.gnome.desktop.background picture-uri` → new wallpaper.
-   - `gsettings set org.gnome.desktop.interface accent-color` → Flow State blue.
-   - Replace `~/.face` with the Flow State logo so GDM shows it.
-   - (System-level `/etc/os-release`, GRUB, Plymouth: deferred to Phase 2.)
-9. **First-login welcome:** an autostart `.desktop` in
-   `~/.config/autostart/flow-state-welcome.desktop` that opens a GNOME Terminal
-   the first time the user logs in, prints a Flow-State-blue banner, and drops
-   the user at a shell with `dsio login` suggested. Marker file
-   `~/.config/flow-state-welcomed` prevents it firing twice.
-10. **Log everything** to `~/flow-state-distro/bootstrap.log`. Exit non-zero on
-    any step failure so the user notices.
-
-**Idempotency:** every step checks state first. Re-running the script is a
-no-op if nothing has changed. That matters because Phase 2's ISO first-boot
-hook will run it once, and Will may re-run it manually to update.
+1. **Preflight** — confirm Ubuntu 24.04, refuse otherwise.
+2. **APT packages** — `git`, `gh`, `curl`, `jq`, `build-essential`,
+   `python3-evdev` (autoscroll daemon), `imagemagick` (wallpaper pipeline),
+   `dconf-cli`, `xdotool`.
+3. **Node 24** — install from NodeSource if `node -v` is below 22.
+4. **Global CLIs** — `@anthropic-ai/claude-code`, `@openai/codex` via `npm -g`.
+5. **Ollama** — upstream install script, service enabled, `qwen2.5-coder:14b`
+   pulled (7B on machines with < 16 GB VRAM).
+6. **DSIO harness** — user-scope (`03-dsio-harness.sh`). `gh` login if
+   missing → `gh repo clone jiujitsumagician/dsio ~/dsio-harness` →
+   `npm install && npm run build` → `~/.local/bin/dsio` shim → user-scope
+   MCP register via `claude mcp add`.
+7. **Autoscroll** — installs the `flow-state-autoscroll` daemon system-wide
+   (via `install-autoscroll.sh` for Phase 1; via the `.deb` for Phase 2).
+   Browser-level fallbacks (Firefox `general.autoScroll`, Chrome
+   `MiddleClickAutoscroll` flag) are opt-in via `FLOWSTATE_BROWSER_AUTOSCROLL=1`
+   and OFF by default — the daemon covers the same ground and Codex flagged
+   two overlapping behaviors as a debug hazard (C.4).
+8. **Branding** — user-scope wallpaper + accent color + `~/.face`. System
+   branding (Plymouth, GRUB, GDM, os-release VARIANT overlay) is Phase 2.
+9. **First-login welcome** — one-shot autostart terminal that runs `dsio
+   login` on the first shell open per user account.
+10. **Log** everything to `bootstrap.log`; non-zero exit on any step failure.
 
 **Testing Phase 1 today:**
 
-- Run it on this machine — most of it is already applied by tonight's session,
-  so the script should mostly be no-op. Anything not idempotent is a bug.
-- Spin up a fresh Ubuntu 24.04 VM (KVM/qemu, disk 30GB, 4 vCPU, 8GB RAM), run
-  `bootstrap.sh`, verify: `dsio` runs, `dsio status` shows Claude+Codex+Ollama
-  OK, Firefox autoscrolls, Chrome autoscrolls, wallpaper is Flow State blue.
+- Re-run on this machine — most work from tonight is already applied, so
+  the script should mostly no-op. Anything not idempotent is a bug.
+- Fresh Ubuntu 24.04 VM (KVM/qemu, 30 GB disk, 4 vCPU, 8 GB RAM), run
+  `bootstrap.sh`, verify: `dsio` works, `dsio status` shows Claude+Codex+
+  Ollama OK, middle-mouse-drag scrolls in Firefox, LibreOffice Writer,
+  Nautilus, and a plain terminal.
 
 ## 4. Middle-click autoscroll — the details
 
@@ -135,13 +132,18 @@ terminals. Not "browser-only", which is what a per-app pref pass gets you.
 small Python daemon runs as a system service. On start it:
 
 1. Enumerates `/dev/input/event*`, filters to devices that look like mice
-   (`BTN_LEFT + BTN_MIDDLE + REL_X + REL_Y`), and dedupes multi-interface
-   HID devices by physical root so a single mouse is only grabbed once.
-2. Grabs those devices exclusively.
+   (`BTN_LEFT + BTN_MIDDLE + REL_X + REL_Y`).
+2. **Grabs every mouse-like event node** (not just one per physical mouse),
+   so a secondary HID interface's raw middle-click cannot leak past the
+   daemon to the compositor. State is grouped by physical root, so a
+   two-interface Razer / Logitech G shares one state object.
 3. Creates one virtual mouse via `uinput` with the union of the real mice's
-   capabilities, plus `REL_WHEEL_HI_RES` / `REL_HWHEEL_HI_RES`.
-4. Forwards every event through to the virtual device *except* the middle
-   button and (while it is held) motion.
+   capabilities (EV_KEY, EV_REL, EV_MSC), plus `REL_WHEEL_HI_RES` /
+   `REL_HWHEEL_HI_RES` even if a source mouse omits them.
+4. Forwards every event through to the virtual device *except*: (a) the raw
+   middle button, and (b) motion while middle is held. Only event codes the
+   virtual device advertises are forwarded — anything else is dropped so a
+   `uinput.write` never crashes the daemon (Codex A.1).
 
 The intercept:
 
@@ -158,93 +160,96 @@ The intercept:
 Because the compositor sees only the virtual device's stream, this works
 identically for X11 and Wayland and for every toolkit: GTK, Qt, Electron,
 Chromium, Firefox (snap), LibreOffice, JetBrains, Godot, terminals, and
-random legacy X apps. It works because every one of them reads scroll events
-the same way — from the input subsystem's wheel codes.
+random legacy X apps.
+
+**Resilience:**
+
+- Every mouse event node is grabbed. A hot-plugged mouse triggers a udev
+  rule (`70-flow-state-autoscroll.rules`) that runs `systemctl try-restart
+  flow-state-autoscroll.service`, causing the daemon to re-enumerate.
+  (Codex A.2 recommended rescan-on-hotplug; udev-triggered restart is the
+  simplest correct implementation.)
+- `dispatch()` runs inside a `try/except` — a single bad event logs and
+  continues rather than killing the daemon (Codex A.4).
+- SIGTERM handler releases every grab cleanly before exit, so `systemctl
+  stop` never leaves the mouse dead.
+- Systemd unit uses `Restart=on-failure`, `NoNewPrivileges=true`,
+  `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`,
+  `DevicePolicy=closed` with `DeviceAllow` narrowed to `/dev/uinput` and
+  `char-input`, and `ExecStartPre=/sbin/modprobe uinput`.
 
 **Cost of this approach:**
 
 - Runs as root (needs raw access to `/dev/input/event*` and `/dev/uinput`).
-  Systemd unit is hardened with `NoNewPrivileges=true`,
-  `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`.
-- Middle-click normal function is preserved via the "click without motion"
-  branch — a real user gesture (press, release without moving) still
-  reaches apps as a plain middle-click.
-- Cursor freeze is inherent to grabbing motion during autoscroll. This
-  matches Windows behavior (Windows freezes the cursor at the click point
-  and shows a four-arrow icon).
+- Cursor freeze is inherent to grabbing motion during autoscroll. Matches
+  Windows behavior (Windows freezes the cursor at the click point and
+  shows a four-arrow icon).
 
-**What is out of scope for v1:**
+**Deferred to v2:**
 
-- The four-arrow autoscroll cursor overlay. Adding this cleanly requires a
-  compositor-level effect (GNOME extension on Wayland, a small X11 overlay
-  window on X11). Deferred.
-- Windows-style "click-once toggle-glide" mode (single middle-click enters
-  perpetual autoscroll until any next click). Trivial to add on top of the
-  current daemon — swap the hold-drag state machine for a toggle one — but
-  it would consume normal middle-click functionality, which Linux users
-  rely on. Keep hold-drag as the default; a config flag can flip to toggle
-  later.
+- The four-arrow autoscroll cursor overlay. Correct implementation is
+  compositor-level: a small override-redirect window on X11 (drawn by a
+  user-session helper that receives state from the root daemon over a Unix
+  socket or D-Bus), and a GNOME Shell extension on Wayland. The root
+  daemon does not draw. (Codex A. overlay recommendation.)
+- Windows-style "click-once toggle-glide" mode. Trivial state-machine
+  swap on top of the current daemon, but consumes normal middle-click.
+  Ship hold-drag by default; add a config flag if Will wants it.
 
-**Files produced (`flow-state-distro/scripts/`):**
-
-- `autoscrolld.py` — the daemon.
-- `flow-state-autoscroll.service` — systemd unit.
-- `install-autoscroll.sh` — one-shot installer (`apt install python3-evdev`,
-  `modprobe uinput` + persistent load, deploy to `/opt/flow-state/`, enable
-  + start service). Requires `sudo` on first run.
+**Files:** `scripts/autoscrolld.py`, `scripts/install-autoscroll.sh`,
+`scripts/flow-state-autoscroll.service`. Phase 1.5 wraps these into
+`packages/flow-state-autoscroll/*.deb` so Phase 2 ISO and Phase 1
+bootstrap install the same artifact (Codex B.5).
 
 **Testing:**
 
 - Verify service runs: `systemctl status flow-state-autoscroll`.
 - Verify virtual device exists: `xinput list | grep flow-state-autoscroll`.
-- In Firefox, Chrome, LibreOffice Writer, GNOME Files (Nautilus), Evince,
-  and GNOME Terminal: hold middle mouse button on any scrollable content,
-  drag, page scrolls. Release, page stops. Quick middle-click still pastes
-  or opens links in a new tab.
-- Regression check: normal cursor motion, left/right click, scroll wheel,
-  side buttons all still work identically to before.
-
-**Fallback for browser-only surface (retained):** the Firefox `user.js`
-and the Chrome `.desktop` `--enable-features=MiddleClickAutoscroll` written
-during this session stay in place. They are redundant with the daemon but
-harmless — the daemon grabs middle-clicks before Firefox/Chrome ever see
-them, so their internal autoscroll never activates.
+- In Firefox, Chrome, LibreOffice Writer, Nautilus, Evince, and GNOME
+  Terminal: hold middle mouse button on any scrollable content, drag,
+  page scrolls. Release, page stops.
+- Regression: normal cursor motion, left/right click, scroll wheel, side
+  buttons all still work identically.
+- Horizontal direction (Codex A.9): verify in LibreOffice Calc, Nautilus
+  column view, and any GTK ScrolledWindow — sign convention has drifted
+  historically. Flip in one place (`autoscrolld.py` REL_HWHEEL branch) if
+  it feels wrong.
 
 ## 5. Phase 2 — ISO build
 
 **Direction: scripted ISO build, not GUI-driven.** Codex's review pushed
-back on Cubic as the primary tool because a GUI/chroot-driven build is hard
-to review, diff, CI, or reproduce. That review is correct once Flow State
-becomes a shippable artifact rather than a personal remix.
+back on Cubic as the primary tool because a GUI/chroot-driven build is
+hard to review, diff, CI, or reproduce. That review is correct once Flow
+State becomes a shippable artifact rather than a personal remix.
 
-**Recommended pipeline (Phase 2.0):** a bash script that follows the same
-shape as `livecd-rootfs`:
+**Recommended pipeline (Phase 2.0):** a bash script (`iso/build-iso.sh`)
+that follows the same shape as `livecd-rootfs`:
 
 1. Pull the official `ubuntu-24.04.4-desktop-amd64.iso` at a pinned
    checksum. Fail if the checksum drifts.
 2. `unsquashfs` the live filesystem to a build dir.
-3. `chroot` in, run `bootstrap-system.sh` (see §7) against a controlled
-   apt state: pinned NodeSource keyring + repo, pinned harness commit
-   (via `.deb` — see §7), pinned Ollama version. Everything the ISO
-   installs comes from a signed source with a recorded checksum.
-4. Bake branding at system level (paths, files below).
+3. `chroot` in, run `bootstrap-system.sh` against a controlled apt state:
+   pinned NodeSource keyring + repo, pinned Ollama version, pinned
+   `flow-state-autoscroll_*.deb`, pinned `flow-state-branding_*.deb`.
+   Everything the ISO installs comes from a signed source with a
+   recorded checksum.
+4. Bake branding at system level (paths below).
 5. `mksquashfs` the modified rootfs. Rebuild the ISO with `xorriso`
    preserving GPT + BIOS/UEFI boot records.
-6. Emit a build manifest: input ISO checksum, package list, `.deb`
+6. Emit a build manifest: input ISO checksum, apt package list, `.deb`
    checksums, resulting ISO checksum.
 7. Boot the ISO in `qemu` as part of the same script (`--test`) so a
    build that produces a non-booting ISO is caught before publish.
 
 **Cubic is fine as a prototype** for iterating on branding assets and
-first-boot UX (unpack once in the GUI, tweak visually, repack). Once the
-result is what we want, the recipe gets ported into the scripted build.
-Cubic is not the release build tool.
+first-boot UX. Once the result is what we want, the recipe gets ported
+into the scripted build. Cubic is not the release build tool.
 
 **Alternatives kept in reserve:**
 
-- `live-build` (Debian's tool). Well-trodden; the tradeoff is that it
-  wants a full config tree of its own rather than "here is a rootfs,
-  respin it." Adopt if the ad-hoc script grows past ~300 lines.
+- `live-build`. Well-trodden; the tradeoff is that it wants a full config
+  tree of its own rather than "here is a rootfs, respin it." Adopt if the
+  ad-hoc script grows past ~300 lines.
 - Ubuntu autoinstall / subiquity. Wrong shape — produces server installs,
   not a live-desktop ISO.
 
@@ -253,9 +258,9 @@ Cubic is not the release build tool.
 - `/etc/os-release`: `PRETTY_NAME="Flow State 1.0 (Noble Numbat remix)"`,
   `VARIANT="Flow State"`, `VARIANT_ID=flowstate`,
   `HOME_URL="https://dsio.io"`. **Leave `ID=ubuntu`, `ID_LIKE="debian"`,
-  and `VERSION_CODENAME=noble` in place.** Vendor install scripts (Chrome,
+  `VERSION_CODENAME=noble` in place.** Vendor install scripts (Chrome,
   NodeSource, ROCm, VS Code, Docker) branch on `ID`/`VERSION_CODENAME`;
-  changing them to `flowstate` breaks those scripts silently. Codex C.3.
+  changing them to `flowstate` breaks those scripts silently (Codex C.3).
 - `/usr/share/backgrounds/flow-state/*.png` + a
   `/usr/share/glib-2.0/schemas/90-flow-state.gschema.override` that sets
   the default wallpaper and accent color for new user accounts.
@@ -269,34 +274,36 @@ Cubic is not the release build tool.
 `dsio.io/download/flow-state-1.0.iso` or a Cloudflare R2 bucket.
 
 **Signing / integrity:** SHA256SUMS + a detached GPG signature with Will's
-key. Not code-signed for Secure Boot in v1 — users installing this will need
-Secure Boot off or use the standard "Install anyway" flow. Add shim-signed
-Secure Boot support later if it matters.
+key. Not code-signed for Secure Boot in v1 — users installing this will
+need Secure Boot off or use the standard "Install anyway" flow. Add
+shim-signed Secure Boot support later if it matters.
 
 ## 6. Branding pass
 
 - **Logo:** `jiujitsumagician/flowstate/public/flowstate-logo.png` (500x500
-  RGBA). Vectorize into an SVG for scaling if we don't already have one;
-  ImageMagick + `potrace` can do a first pass.
-- **Accent color:** DSIO uses `#3D8FD4` (from `install.ps1`). Flow State
-  should be its own hue — pull from the flowstate logo directly. Placeholder:
-  `#185FA5` (DSIO deep blue) until we sample.
-- **Wallpaper:** designed 1440p + 4K. Simple: logo bottom-right, radial
-  gradient of Flow-State-blue, subtle grid or particle field. Generated by
-  Will's design tools, not this spec.
-- **Distro name string:** "Flow State" everywhere the user sees the OS name.
-  `lsb_release -d` → `Flow State 1.0 (Noble Numbat remix)`.
-- **Terminal:** GNOME Terminal remains default. Ship a `flow-state-blue.gschema`
-  color profile as the default so a fresh terminal opens in Flow State colors.
+  RGBA), copied to `branding/flowstate-logo.png`. Vectorize into an SVG
+  for scaling if we don't already have one; ImageMagick + `potrace` can
+  do a first pass.
+- **Accent color:** DSIO's brand blue is `#3D8FD4` / deep `#185FA5`. Flow
+  State can share this palette or pick its own hue — sample directly from
+  the flowstate logo before ISO build.
+- **Wallpaper:** 1440p + 4K, generated at Phase 1 branding step via
+  ImageMagick: logo centered on a Flow-State-blue gradient. Bespoke art
+  later.
+- **Distro name string:** "Flow State" everywhere the user sees the OS
+  name (`lsb_release -d` → `Flow State 1.0 (Noble Numbat remix)`). See
+  the caveat in §5 about `ID=ubuntu`.
+- **Terminal:** GNOME Terminal remains default. A `flow-state-blue`
+  gschema color profile ships as the default so a fresh terminal opens
+  in Flow State colors.
 
 ## 7. DSIO harness — what "preinstalled" means
 
 **Codex C.2 is a hard blocker on baking the harness into the ISO.** The
-harness lives at `jiujitsumagician/dsio`, a private repo. If a shipped ISO
-contains the source, everyone who downloads Flow State has that source —
-the "private" status becomes fiction. Same problem baking a checkout into
-`/opt/`. Fix: **the ISO ships the harness's *prerequisites and installer*,
-not the harness source**.
+harness lives at `jiujitsumagician/dsio`, a private repo. If a shipped
+ISO contains the source, everyone who downloads Flow State has that
+source — the "private" status becomes fiction. Fix: **the ISO ships the
+harness's *prerequisites and installer*, not the harness source**.
 
 **What the ISO bakes system-wide:**
 
@@ -305,16 +312,14 @@ not the harness source**.
   first-boot doesn't wait on an 8 GB download.
 - `@anthropic-ai/claude-code` and `@openai/codex` installed globally via
   npm.
-- The `flow-state-autoscroll` daemon as a `.deb` (see §8) so the systemd
-  unit, uinput module config, and daemon source are one package.
+- The `flow-state-autoscroll` daemon as a `.deb` — systemd unit, uinput
+  module config, daemon source in one signed package.
 - The Flow State branding (Plymouth, GRUB, GDM, wallpapers, os-release
-  overlay).
-- The `flow-state-dsio` first-login helper (`~/.local/share/flow-state/`)
-  that runs at first shell open per user, prompts `dsio login`, and lets
-  the DSIO harness bootstrap itself from GitHub with the user's own `gh`
-  auth. This is the same flow as
-  `irm https://dsio.io/install.ps1 | iex` on Windows — hosted, versioned,
-  authored in the DSIO repo, not baked into Flow State's ISO.
+  overlay) as `flow-state-branding_*.deb`.
+- A first-login helper (`~/.local/share/flow-state/`) that on first shell
+  open per user prompts `dsio login`, and lets the DSIO harness bootstrap
+  itself from GitHub with the user's own `gh` auth. Same shape as
+  `irm https://dsio.io/install.ps1 | iex` on Windows.
 
 **What the ISO does NOT bake:**
 
@@ -322,63 +327,83 @@ not the harness source**.
 - Any DSIO credentials, model tokens, or vault contents.
 
 **Trade-off:** first login on a fresh Flow State install still requires
-network access + a `gh auth login` browser flow. That's the correct
-behavior for a distro whose harness is per-user-authenticated. Users who
-run Flow State air-gapped can pre-clone the harness into `~/dsio-harness`
-themselves; the first-login helper detects it and skips the online step.
+network access + a `gh auth login` browser flow. Correct behavior for a
+distro whose harness is per-user-authenticated. Users who run Flow State
+air-gapped can pre-clone the harness into `~/dsio-harness` themselves;
+the first-login helper detects it and skips the online step.
 
 **Update path:** `dsio update` (already in the harness) pulls, rebuilds,
-relaunches. No distro-level updater needed for the harness. Ubuntu's own
-`apt update` handles system packages.
+relaunches. Ubuntu's own `apt update` handles system packages.
 
 ## 8. Open questions / risks
 
-1. **Chrome + license:** shipping Chrome in the ISO requires Google's
-   redistribution terms. Chromium is fine but Will's setup uses Chrome. Either
-   ship Chromium and let users install Chrome themselves, or ship a stub
-   installer.
-2. **Snap Firefox reproducibility:** Firefox on Ubuntu 24.04 is snap-only by
-   default. Snap versioning drifts. If ISO reproducibility matters,
-   consider swapping to Firefox ESR from Mozilla's official APT repo.
-3. **HWE kernel drift:** this machine runs 6.17-HWE; stock 24.04.4 ships
-   6.8. HWE is opt-in via `linux-generic-hwe-24.04`. Decide whether Flow
-   State bakes HWE by default (safer for newer hardware like Will's 9060 XT).
-4. **AMD ROCm:** Will's `amdgpu-install_7.2.3.70203-1_all.deb` isn't part of
-   stock Ubuntu. If we want Ollama-on-GPU by default, bake ROCm 7.2. If we
-   don't, Qwen runs on CPU and is much slower. Recommend baking ROCm for the
-   AMD-GPU install variant; keep a CPU-only ISO as fallback.
-5. **Middle-click autoscroll on Chrome/Linux:** the flag may not actually
-   surface autoscroll on Linux builds. Empirically verify on this machine
-   before promising it in the ISO. If it doesn't work, use the extension
-   fallback via `ExtensionInstallForcelist` policy.
-6. **Secure Boot:** unsigned ISOs are a friction point. Not blocking v1.
-7. **First-login flow:** need to decide UX. Options: (a) drop user at a
-   normal GNOME desktop, autostart shows a Flow State terminal running
-   `dsio login`; (b) run a GNOME Initial Setup replacement branded as
-   Flow State that walks through Ubuntu setup + `dsio login` in one flow.
-   (a) is much less work.
-8. **Update cadence:** Flow State needs its own release track. Recommend
-   Flow State X.Y where X is major (rebase to newer Ubuntu LTS) and Y is
-   minor (config/harness bumps). v1 targets Ubuntu 24.04; v2 targets 26.04
-   when it ships.
+Distro-engineering basics named here so Phase 2 doesn't collide with
+them:
+
+1. **Signed apt repo** at e.g. `apt.dsio.io` so Flow State can ship
+   `flow-state-*` packages with automatic security updates via
+   `unattended-upgrades`. Without this, users have to `apt install
+   ./flow-state-autoscroll_*.deb` from a local file. Not v1 blocking;
+   name and design now.
+2. **`flow-state-desktop` metapackage** — depends on every distro-owned
+   package (`flow-state-autoscroll`, `flow-state-branding`,
+   `flow-state-welcome`, `flow-state-defaults`). `apt install
+   flow-state-desktop` on a stock Ubuntu machine effectively converts
+   it to Flow State from apt alone. (Codex C.10.)
+3. **Chrome licensing.** Google Chrome's redistribution terms probably
+   forbid shipping Chrome in a public ISO. Ship Chromium (or a first-run
+   installer that offers to fetch Chrome from Google's own repo) rather
+   than baking Chrome (Codex C.8).
+4. **Snap Firefox reproducibility.** Firefox on Ubuntu 24.04 is snap-only
+   by default. Snap versioning drifts. If ISO reproducibility matters,
+   swap to Firefox ESR from Mozilla's official APT repo.
+5. **HWE kernel drift.** This machine runs 6.17-HWE; stock 24.04.4 ships
+   6.8. Recommend `linux-generic-hwe-24.04` in the metapackage — safer
+   for newer hardware like Will's 9060 XT.
+6. **AMD ROCm / hardware profiles.** ROCm 7.2 adds kernel/driver/package
+   fragility. Keep the base ISO CPU-safe; ship `flow-state-amdgpu` and
+   later `flow-state-nvidia` profiles that layer ROCm/CUDA on top.
+   (Codex C.7.)
+7. **Secure Boot.** Unsigned ISOs are a friction point. Not blocking v1.
+   Shim-signed later.
+8. **First-login flow.** Options: (a) drop user at a normal GNOME
+   desktop; a Flow-State-branded terminal autoruns `dsio login`; (b)
+   replace GNOME Initial Setup with a Flow-State-branded onboarding that
+   walks through Ubuntu setup + `dsio login` together. (a) ships now;
+   (b) is a v2 polish item.
+9. **QA matrix.** Enumerate the hardware + install-path combinations
+   Flow State claims to support (this machine's Radeon RX 9060 XT, a
+   generic Intel iGPU laptop, an NVIDIA laptop, qemu/UEFI, qemu/BIOS).
+   No promises for combinations that aren't tested.
+10. **Recovery path.** Grub recovery entry that boots a Flow-State-clean
+    session (no autostart, no autoscroll grab) for triage. Ships in v1.
+11. **License / SBOM.** Publish the full package manifest and license
+    inventory alongside each ISO. `dpkg -l` inside the chroot at build
+    time is the minimum viable SBOM. Full CycloneDX later.
 
 ## 9. Milestones
 
-- **M0** (this session): DSIO harness installed on Will's current machine,
-  middle-click autoscroll patched for Firefox + Chrome. DONE.
-- **M1:** `bootstrap.sh` extracted from what we did tonight, versioned in a
-  new `jiujitsumagician/flow-state-distro` repo. Re-run on this machine
-  should be a no-op.
-- **M2:** Fresh Ubuntu 24.04 VM + `bootstrap.sh` → verified Flow State
+- **M0** (this session): DSIO harness installed on Will's current machine;
+  system-wide autoscroll daemon written, reviewed against Codex, and
+  committed in `flow-state-distro/`. Bootstrap scripts extracted.
+- **M1:** re-run `bootstrap.sh` on this machine — must be a no-op.
+  Package the autoscroll daemon as a real `.deb` and install it that way
+  instead of the raw `install-autoscroll.sh`. (Codex B.5.)
+- **M2:** fresh Ubuntu 24.04 VM + `bootstrap.sh` → verified Flow State
   environment. Screenshot for the record.
-- **M3:** First Cubic ISO build, boots in qemu, `dsio` works after first-
-  login flow.
+- **M3:** first scripted `build-iso.sh` produces a bootable Flow State
+  ISO in qemu; first-login flow works.
 - **M4:** ISO burned to USB, installed on a real second machine, works.
-  This is when Flow State is "shippable."
-- **M5** (stretch): Signed release published, dsio.io/download link live.
+  This is when Flow State is "shippable" to friends.
+- **M5** (stretch): signed release published at dsio.io, `apt.dsio.io`
+  apt repo for auto-updates, `flow-state-desktop` metapackage in that
+  repo.
 
 ## 10. Immediate next step
 
-Approve or redirect this design. On approval, next skill is `writing-plans`
-to produce an implementation plan for M1 (extract `bootstrap.sh` from
-tonight's work, structure the repo, prove idempotency on this machine).
+- Split `bootstrap.sh` into `bootstrap-system.sh` + `bootstrap-user.sh`
+  as the Phase 1 shape (Codex C.6).
+- Build the first `.deb` for `flow-state-autoscroll` (Codex B.5) so M1
+  installs it as a package, not via ad-hoc `install-autoscroll.sh`.
+- After Will approves, `writing-plans` skill produces the M1
+  implementation plan.
