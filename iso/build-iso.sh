@@ -47,6 +47,28 @@ for cmd in xorriso unsquashfs mksquashfs wget rsync chroot mount umount curl sha
   }
 done
 
+# --- Defensive: always umount anything still mounted under $WORK BEFORE
+# --- doing any rm. A previous killed build can leave /dev bind-mounted
+# --- under the rootfs; `rm -rf` walking into a live bind mount will
+# --- delete /dev/null (or worse) on the host.
+purge_work_mounts() {
+  local mp
+  # Reverse order — inner mounts first (dev/pts before dev, etc.)
+  # findmnt lists mount points as descendants of a target.
+  while IFS= read -r mp; do
+    [[ -n "$mp" ]] && umount -R "$mp" 2>/dev/null || umount "$mp" 2>/dev/null || true
+  done < <(findmnt -R -n -o TARGET "$WORK" 2>/dev/null | tac)
+  # Belt-and-suspenders: try the paths we know we mount.
+  for m in "$CHROOT/dev/pts" "$CHROOT/dev/shm" "$CHROOT/dev/mqueue" \
+           "$CHROOT/dev/hugepages" "$CHROOT/dev" \
+           "$CHROOT/proc" "$CHROOT/sys" "$CHROOT/run" \
+           "$ISO_MOUNT"; do
+    umount "$m" 2>/dev/null || true
+  done
+}
+
+purge_work_mounts
+
 if [[ "${1:-}" == "--clean" ]]; then
   say "clean: removing $WORK"
   rm -rf "$WORK"
@@ -57,10 +79,14 @@ mkdir -p "$CACHE" "$WORK" "$ISO_ROOT" "$ISO_MOUNT" "$CHROOT"
 CLEANUP_MOUNTS=()
 cleanup() {
   set +e
-  for m in "${CLEANUP_MOUNTS[@]}"; do umount "$m" 2>/dev/null; done
-  umount "$ISO_MOUNT" 2>/dev/null
+  # In reverse (LIFO).
+  local i
+  for (( i=${#CLEANUP_MOUNTS[@]}-1 ; i>=0 ; i-- )) ; do
+    umount "${CLEANUP_MOUNTS[i]}" 2>/dev/null || umount -l "${CLEANUP_MOUNTS[i]}" 2>/dev/null || true
+  done
+  umount "$ISO_MOUNT" 2>/dev/null || true
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # --- 1. Fetch upstream ISO ----------------------------------------------
 if [[ ! -f "$UBUNTU_ISO" ]]; then
@@ -119,7 +145,13 @@ mount --bind /dev/pts "$CHROOT/dev/pts"; CLEANUP_MOUNTS+=("$CHROOT/dev/pts")
 mount -t proc proc "$CHROOT/proc"; CLEANUP_MOUNTS+=("$CHROOT/proc")
 mount -t sysfs sysfs "$CHROOT/sys"; CLEANUP_MOUNTS+=("$CHROOT/sys")
 mount -t tmpfs tmpfs "$CHROOT/run"; CLEANUP_MOUNTS+=("$CHROOT/run")
-cp -f /etc/resolv.conf "$CHROOT/etc/resolv.conf"
+# The rootfs ships /etc/resolv.conf as a symlink into /run/systemd/resolve/
+# which the tmpfs mount above turned into a dangling link. `cp -f` refuses
+# to write through a dangling symlink, so delete it first, then drop the
+# host's resolv.conf in as a real file. It gets restored to the symlink
+# after the chroot pass so the live boot uses systemd-resolved normally.
+rm -f "$CHROOT/etc/resolv.conf"
+cp /etc/resolv.conf "$CHROOT/etc/resolv.conf"
 
 # --- 6. Run bootstrap-system.sh + 99-strip-ubuntu inside the chroot ----
 say "running bootstrap-system.sh + strip-ubuntu inside chroot"
