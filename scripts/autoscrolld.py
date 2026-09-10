@@ -58,10 +58,13 @@ TAP_MAX_MS = 180                # a middle press+release inside this many ms wit
 TAP_MAX_PX = 5                  # under this many px of motion is a normal middle-click.
 
 GLIDE_TICK_SECONDS = 0.03       # how often we emit scroll notches while gliding.
-DEADZONE_PX = 6                 # motion inside +-DEADZONE_PX from the anchor doesn't scroll.
-V_SCALE_PX_PER_NOTCH = 22       # every N px above the deadzone → +1 vertical notch per tick.
-H_SCALE_PX_PER_NOTCH = 32       # same, horizontal.
-MAX_NOTCHES_PER_TICK = 6        # cap so a fast fling doesn't warp entire pages.
+DEADZONE_PX = 8                 # motion inside ±DEADZONE_PX from the anchor doesn't scroll.
+V_POWER = 1.8                   # acceleration curve exponent (>1 = slow start, faster far away)
+H_POWER = 1.6                   # slightly gentler curve for horizontal.
+V_SCALE = 40.0                  # dividing constant: raise → slower overall.
+H_SCALE = 55.0
+V_MAX_NOTCHES_PER_SEC = 220.0   # top scroll speed (vertical), notches per second.
+H_MAX_NOTCHES_PER_SEC = 140.0   # top scroll speed (horizontal).
 HI_RES_STEP = 120               # standard REL_*_HI_RES step size per notch.
 
 LOG_PREFIX = "flow-state-autoscroll:"
@@ -148,6 +151,10 @@ class MouseState:
     anchor_dx: float = 0.0
     anchor_dy: float = 0.0
     last_tick: float = 0.0
+    # Fractional-notch accumulators so slow speeds don't stutter — a
+    # per-tick rate of 0.3 notches emits 1 notch every ~3 ticks smoothly.
+    v_credit: float = 0.0
+    h_credit: float = 0.0
 
 
 # --- The daemon ---------------------------------------------------------
@@ -230,33 +237,62 @@ def run() -> int:
     return 0
 
 
+def _rate_from_distance(dist_abs: float, scale: float, power: float, max_rate: float) -> float:
+    """Convert distance-from-anchor (px, positive) to notches per second.
+
+    Slow start / fast-far-away curve: (excess/scale)^power, capped at
+    max_rate. In the deadzone this returns 0.
+    """
+    excess = dist_abs - DEADZONE_PX
+    if excess <= 0:
+        return 0.0
+    rate = (excess / scale) ** power
+    if rate > max_rate:
+        rate = max_rate
+    return rate
+
+
 def _glide_tick(st: MouseState, ui) -> None:
-    """Emit scroll notches proportional to (anchor_dx, anchor_dy)."""
+    """Emit scroll notches based on distance-from-anchor with an
+    accelerating curve — starts slow inside a small distance, ramps up
+    quickly as you push the mouse further from the click point.
+    """
     dy = st.anchor_dy
     dx = st.anchor_dx
     emitted = False
 
-    if abs(dy) > DEADZONE_PX:
-        excess = abs(dy) - DEADZONE_PX
-        notches = int(excess / V_SCALE_PX_PER_NOTCH) + 1
-        notches = min(notches, MAX_NOTCHES_PER_TICK)
-        # Kernel convention: REL_WHEEL positive = scroll up; mouse pushed down
-        # (dy > 0) should scroll down, so invert.
-        sign = -1 if dy > 0 else 1
-        for _ in range(notches):
-            ui.write(e.EV_REL, e.REL_WHEEL_HI_RES, sign * HI_RES_STEP)
-            ui.write(e.EV_REL, e.REL_WHEEL, sign)
-        emitted = True
+    # Vertical.
+    rate_v = _rate_from_distance(abs(dy), V_SCALE, V_POWER, V_MAX_NOTCHES_PER_SEC)
+    if rate_v > 0:
+        st.v_credit += rate_v * GLIDE_TICK_SECONDS
+        whole = int(st.v_credit)
+        if whole >= 1:
+            st.v_credit -= whole
+            # Cap this tick so a huge burst doesn't warp the whole page.
+            whole = min(whole, 10)
+            sign = -1 if dy > 0 else 1
+            for _ in range(whole):
+                ui.write(e.EV_REL, e.REL_WHEEL_HI_RES, sign * HI_RES_STEP)
+                ui.write(e.EV_REL, e.REL_WHEEL, sign)
+            emitted = True
+    else:
+        st.v_credit = 0.0  # reset in deadzone
 
-    if abs(dx) > DEADZONE_PX:
-        excess = abs(dx) - DEADZONE_PX
-        notches = int(excess / H_SCALE_PX_PER_NOTCH) + 1
-        notches = min(notches, MAX_NOTCHES_PER_TICK)
-        sign = 1 if dx > 0 else -1
-        for _ in range(notches):
-            ui.write(e.EV_REL, e.REL_HWHEEL_HI_RES, sign * HI_RES_STEP)
-            ui.write(e.EV_REL, e.REL_HWHEEL, sign)
-        emitted = True
+    # Horizontal.
+    rate_h = _rate_from_distance(abs(dx), H_SCALE, H_POWER, H_MAX_NOTCHES_PER_SEC)
+    if rate_h > 0:
+        st.h_credit += rate_h * GLIDE_TICK_SECONDS
+        whole = int(st.h_credit)
+        if whole >= 1:
+            st.h_credit -= whole
+            whole = min(whole, 8)
+            sign = 1 if dx > 0 else -1
+            for _ in range(whole):
+                ui.write(e.EV_REL, e.REL_HWHEEL_HI_RES, sign * HI_RES_STEP)
+                ui.write(e.EV_REL, e.REL_HWHEEL, sign)
+            emitted = True
+    else:
+        st.h_credit = 0.0
 
     if emitted:
         try:
