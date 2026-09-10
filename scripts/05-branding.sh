@@ -22,7 +22,7 @@ fi
 # --- System-wide wallpaper install ---------------------------------------
 if [[ -d "$WP_SRC" ]] && [[ -n "$SUDO" || $EUID -eq 0 ]]; then
   $SUDO install -d -m 0755 /usr/share/backgrounds/flow-state
-  for w in flow-state-aurora.jpg flow-state-nebula.jpg flow-state-ember.jpg; do
+  for w in flow-state-aurora.jpg flow-state-nebula.jpg flow-state-ember.jpg flow-state-stripe.png flow-state-horizon.png flow-state-crystal.png flow-state-glass.png flow-state-grid.png flow-state-drift.png; do
     if [[ -f "$WP_SRC/$w" ]]; then
       $SUDO install -m 0644 "$WP_SRC/$w" /usr/share/backgrounds/flow-state/
     fi
@@ -33,30 +33,15 @@ if [[ -d "$WP_SRC" ]] && [[ -n "$SUDO" || $EUID -eq 0 ]]; then
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE wallpapers SYSTEM "gnome-wp-list.dtd">
 <wallpapers>
-  <wallpaper>
-    <name>Flow State — Aurora</name>
-    <filename>/usr/share/backgrounds/flow-state/flow-state-aurora.jpg</filename>
-    <options>zoom</options>
-    <pcolor>#0b1d3f</pcolor>
-    <scolor>#0b1d3f</scolor>
-    <shade_type>solid</shade_type>
-  </wallpaper>
-  <wallpaper>
-    <name>Flow State — Nebula</name>
-    <filename>/usr/share/backgrounds/flow-state/flow-state-nebula.jpg</filename>
-    <options>zoom</options>
-    <pcolor>#2b0a3f</pcolor>
-    <scolor>#2b0a3f</scolor>
-    <shade_type>solid</shade_type>
-  </wallpaper>
-  <wallpaper>
-    <name>Flow State — Ember</name>
-    <filename>/usr/share/backgrounds/flow-state/flow-state-ember.jpg</filename>
-    <options>zoom</options>
-    <pcolor>#3f0b18</pcolor>
-    <scolor>#3f0b18</scolor>
-    <shade_type>solid</shade_type>
-  </wallpaper>
+  <wallpaper><name>Flow State — Stripe</name><filename>/usr/share/backgrounds/flow-state/flow-state-stripe.png</filename><options>zoom</options><pcolor>#050505</pcolor><scolor>#050505</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Horizon</name><filename>/usr/share/backgrounds/flow-state/flow-state-horizon.png</filename><options>zoom</options><pcolor>#0a0a0a</pcolor><scolor>#0a0a0a</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Crystal</name><filename>/usr/share/backgrounds/flow-state/flow-state-crystal.png</filename><options>zoom</options><pcolor>#1a1a1a</pcolor><scolor>#1a1a1a</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Glass</name><filename>/usr/share/backgrounds/flow-state/flow-state-glass.png</filename><options>zoom</options><pcolor>#c8c8c8</pcolor><scolor>#c8c8c8</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Grid</name><filename>/usr/share/backgrounds/flow-state/flow-state-grid.png</filename><options>zoom</options><pcolor>#080808</pcolor><scolor>#080808</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Drift</name><filename>/usr/share/backgrounds/flow-state/flow-state-drift.png</filename><options>zoom</options><pcolor>#0d0d0d</pcolor><scolor>#0d0d0d</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Aurora</name><filename>/usr/share/backgrounds/flow-state/flow-state-aurora.jpg</filename><options>zoom</options><pcolor>#0b1d3f</pcolor><scolor>#0b1d3f</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Nebula</name><filename>/usr/share/backgrounds/flow-state/flow-state-nebula.jpg</filename><options>zoom</options><pcolor>#2b0a3f</pcolor><scolor>#2b0a3f</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Ember</name><filename>/usr/share/backgrounds/flow-state/flow-state-ember.jpg</filename><options>zoom</options><pcolor>#3f0b18</pcolor><scolor>#3f0b18</scolor><shade_type>solid</shade_type></wallpaper>
 </wallpapers>
 XML
   echo "  system wallpapers installed to /usr/share/backgrounds/flow-state/"
@@ -67,10 +52,10 @@ if command -v gsettings >/dev/null 2>&1; then
   # Prefer the system-installed Aurora; fall back to the repo copy if the
   # system install did not happen (no sudo).
   WP=""
-  if [[ -f /usr/share/backgrounds/flow-state/flow-state-aurora.jpg ]]; then
-    WP=/usr/share/backgrounds/flow-state/flow-state-aurora.jpg
-  elif [[ -f "$WP_SRC/flow-state-aurora.jpg" ]]; then
-    WP="$WP_SRC/flow-state-aurora.jpg"
+  if [[ -f /usr/share/backgrounds/flow-state/flow-state-stripe.png ]]; then
+    WP=/usr/share/backgrounds/flow-state/flow-state-stripe.png
+  elif [[ -f "$WP_SRC/flow-state-stripe.png" ]]; then
+    WP="$WP_SRC/flow-state-stripe.png"
   fi
   if [[ -n "$WP" ]]; then
     gsettings set org.gnome.desktop.background picture-uri "file://$WP"
