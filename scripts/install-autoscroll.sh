@@ -53,17 +53,27 @@ EOF
 udevadm control --reload-rules || true
 
 echo "==> Enabling + (re)starting service"
-systemctl daemon-reload
-systemctl enable flow-state-autoscroll.service
-if systemctl is-active --quiet flow-state-autoscroll.service; then
-  systemctl restart flow-state-autoscroll.service
+# Detect a chroot (no PID 1 systemd) — the ISO build reaches this from
+# inside `chroot` where systemctl start would fail. Enable is fine (writes
+# symlinks); start is skipped and the service comes up on first boot.
+if [[ -d /run/systemd/system ]]; then
+  systemctl daemon-reload
+  systemctl enable flow-state-autoscroll.service
+  if systemctl is-active --quiet flow-state-autoscroll.service; then
+    systemctl restart flow-state-autoscroll.service
+  else
+    systemctl start flow-state-autoscroll.service
+  fi
+  echo
+  echo "==> Status"
+  systemctl --no-pager --lines=8 status flow-state-autoscroll.service || true
 else
-  systemctl start flow-state-autoscroll.service
+  echo "  no live systemd (chroot?); just enabling via symlink"
+  # Manual "enable" — equivalent to `systemctl enable` when systemd isn't PID 1.
+  install -d /etc/systemd/system/multi-user.target.wants
+  ln -sf /etc/systemd/system/flow-state-autoscroll.service \
+        /etc/systemd/system/multi-user.target.wants/flow-state-autoscroll.service
 fi
-
-echo
-echo "==> Status"
-systemctl --no-pager --lines=8 status flow-state-autoscroll.service || true
 
 echo
 echo "Done. Middle-mouse-hold + drag now scrolls system-wide."
