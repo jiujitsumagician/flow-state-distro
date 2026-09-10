@@ -16,6 +16,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ $EUID -eq 0 ]]; then
   echo "==> System-side Thingwhere-style launcher"
+  # Ulauncher isn't in Noble's default repos; add its official PPA.
+  if ! grep -rq "agornostal/ulauncher" /etc/apt/sources.list.d/ 2>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
+    add-apt-repository -y ppa:agornostal/ulauncher 2>&1 | tail -3
+    apt-get update -qq
+  fi
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ulauncher \
     2>&1 | tail -3
