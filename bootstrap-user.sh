@@ -60,4 +60,7 @@ bash "$SCRIPTS/12-network.sh"
 say "13: phone integration (user)"
 bash "$SCRIPTS/13-phone.sh"
 
+say "14: GPU-aware system monitor"
+bash "$SCRIPTS/14-system-monitor.sh"
+
 say "user layer complete. Open a fresh terminal and type: dsio"
