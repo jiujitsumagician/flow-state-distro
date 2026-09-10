@@ -40,7 +40,7 @@ CLI = os.path.join(DSIO_HARNESS, "dist/src/cli/index.js")
 # install-icons in this distro) ships `flow-state` at every panel size,
 # so gnome-shell can pick the right one. A 500px raw PNG passed as a
 # path renders as invisible on some panel implementations.
-ICON_NAME = "flow-state"
+ICON_NAME = "applications-science-symbolic"  # unambiguous "AI/LLM" icon
 POLL_SECONDS = 15
 
 
@@ -173,9 +173,8 @@ class Tray:
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-        self.indicator.set_title("Flow State — DSIO status")
-        # An attention icon that catches the eye if a provider goes red.
-        self.indicator.set_attention_icon_full(ICON_NAME, "attention")
+        self.indicator.set_title("Flow State — AI models (Claude, Codex, Ollama)")
+        self.indicator.set_attention_icon_full("dialog-warning-symbolic", "attention")
         self.menu = Gtk.Menu()
         self._menu_items: list[Gtk.MenuItem] = []
         self._rebuild_menu({"loading": True})
@@ -193,30 +192,27 @@ class Tray:
         self._rebuild_menu(data)
 
     def _render_label(self, data: dict) -> None:
+        # VPN state does NOT go on this label — VPN belongs to the Network
+        # tray. This tray is only about LLM/DSIO health, so its label
+        # names the models directly.
         if "error" in data:
-            self.indicator.set_label("DSIO ⚠", "flow-state-dsio")
+            self.indicator.set_label("AI  ⚠", "flow-state-dsio")
             return
-        parts: list[str] = []
+        parts: list[str] = ["AI"]
         for p in data.get("providers") or []:
             name = p.get("provider")
-            available = p.get("available")
+            av = p.get("available")
             if name == "claude-sub":
                 pct5 = _pct5h(p)
                 if pct5 is not None:
-                    parts.append(f"C {int(round(pct5))}%")
+                    parts.append(f"Claude {int(round(pct5))}%")
                 else:
-                    parts.append("C ok" if available else "C ⚠")
+                    parts.append("Claude ok" if av else "Claude ⚠")
             elif name == "codex":
-                parts.append("X ok" if available else "X ⚠")
+                parts.append("Codex ok" if av else "Codex ⚠")
             elif name == "ollama":
-                parts.append("O ok" if available else "O ⚠")
-        # Prepend VPN state so it's visible at a glance in the label.
-        vpn = vpn_probe()
-        if vpn["installed"]:
-            parts.insert(0, "🔒 on" if vpn["connected"] else "🔓")
-        if not parts:
-            parts = ["DSIO"]
-        self.indicator.set_label("  ".join(parts[:4]), "flow-state-dsio")
+                parts.append("Ollama ok" if av else "Ollama ⚠")
+        self.indicator.set_label("  ·  ".join(parts[:4]), "flow-state-dsio")
 
     def _rebuild_menu(self, data: dict) -> None:
         for it in self._menu_items:
@@ -249,19 +245,6 @@ class Tray:
                 if confidence and not available:
                     bits.append(str(confidence))
                 self._append(Gtk.MenuItem(label="  ".join(bits)))
-
-        self._append(Gtk.SeparatorMenuItem())
-
-        # ProtonVPN toggle — always shown, adapts to backend state.
-        vpn = vpn_probe()
-        if not vpn["installed"]:
-            vpn_item = Gtk.MenuItem(label="🔓 Install ProtonVPN…")
-        elif vpn["connected"]:
-            vpn_item = Gtk.MenuItem(label="🔒 Disconnect ProtonVPN")
-        else:
-            vpn_item = Gtk.MenuItem(label="🔓 Connect ProtonVPN (fastest)")
-        vpn_item.connect("activate", lambda _i: vpn_toggle())
-        self._append(vpn_item)
 
         self._append(Gtk.SeparatorMenuItem())
 

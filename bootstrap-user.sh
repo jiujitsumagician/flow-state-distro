@@ -54,4 +54,7 @@ bash "$SCRIPTS/09-browser.sh"
 say "11: file-manager thumbnails (user)"
 bash "$SCRIPTS/11-thumbnails.sh"
 
+say "12: Flow State Network tray"
+bash "$SCRIPTS/12-network.sh"
+
 say "user layer complete. Open a fresh terminal and type: dsio"
