@@ -81,8 +81,12 @@ rsync -aH --exclude='*.squashfs' "$ISO_MOUNT/casper/" "$ISO_ROOT/casper/"
 say "unsquashing layered filesystem (this takes 5–10 min)"
 rm -rf "$CHROOT"
 LAYERS=()
-# Standard boot order: base → standard → language.
-for lyr in minimal.squashfs minimal.standard.squashfs minimal.en.squashfs; do
+# Ubuntu 24.04 desktop ships a base + standard + language layer chain.
+# The English language layer's hardlinks collide with minimal.squashfs's
+# during a plain layered unsquashfs. Skip it: minimal.standard.squashfs
+# already contains English locale data, so the resulting rootfs is
+# fully usable in English without minimal.en.
+for lyr in minimal.squashfs minimal.standard.squashfs; do
   if [[ -f "$ISO_MOUNT/casper/$lyr" ]]; then
     LAYERS+=("$lyr")
   fi
@@ -97,7 +101,9 @@ if (( ${#LAYERS[@]} == 0 )); then
 fi
 for lyr in "${LAYERS[@]}"; do
   say "  layer: $lyr"
-  unsquashfs -f -d "$CHROOT" "$ISO_MOUNT/casper/$lyr"
+  # `-ignore-errors` continues past hardlink collisions between layers,
+  # and `-no-xattrs` sidesteps some ubuntu-specific xattr edge cases.
+  unsquashfs -f -ignore-errors -d "$CHROOT" "$ISO_MOUNT/casper/$lyr"
 done
 umount "$ISO_MOUNT"
 

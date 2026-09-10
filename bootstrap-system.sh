@@ -102,5 +102,11 @@ bash "$HERE/scripts/13-phone.sh"
 say "14: GPU-aware system monitor"
 bash "$HERE/scripts/14-system-monitor.sh"
 
+say "15: Thingwhere-style launcher (Ulauncher)"
+bash "$HERE/scripts/15-thingwhere.sh"
+
+say "16: dock hover previews"
+bash "$HERE/scripts/16-dock-preview.sh"
+
 say "99: strip Ubuntu artwork + brand as Flow State"
 bash "$HERE/scripts/99-strip-ubuntu.sh"

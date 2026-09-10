@@ -63,4 +63,10 @@ bash "$SCRIPTS/13-phone.sh"
 say "14: GPU-aware system monitor"
 bash "$SCRIPTS/14-system-monitor.sh"
 
+say "15: Thingwhere-style launcher"
+bash "$SCRIPTS/15-thingwhere.sh"
+
+say "16: dock hover previews"
+bash "$SCRIPTS/16-dock-preview.sh"
+
 say "user layer complete. Open a fresh terminal and type: dsio"
