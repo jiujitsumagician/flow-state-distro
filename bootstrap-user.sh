@@ -57,4 +57,7 @@ bash "$SCRIPTS/11-thumbnails.sh"
 say "12: Flow State Network tray"
 bash "$SCRIPTS/12-network.sh"
 
+say "13: phone integration (user)"
+bash "$SCRIPTS/13-phone.sh"
+
 say "user layer complete. Open a fresh terminal and type: dsio"
