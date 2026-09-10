@@ -95,3 +95,6 @@ bash "$HERE/scripts/10-vpn.sh" || echo "  (ProtonVPN install skipped; install la
 
 say "11: file-manager thumbnails (system)"
 bash "$HERE/scripts/11-thumbnails.sh"
+
+say "99: strip Ubuntu artwork + brand as Flow State"
+bash "$HERE/scripts/99-strip-ubuntu.sh"
