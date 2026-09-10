@@ -1,0 +1,6 @@
+bootstrap.log
+*.log
+*.iso
+node_modules/
+__pycache__/
+*.pyc

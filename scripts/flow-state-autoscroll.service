@@ -1,0 +1,41 @@
+[Unit]
+Description=Flow State autoscroll daemon (middle-click drag = scroll, system-wide)
+Documentation=https://github.com/jiujitsumagician/flow-state-distro
+After=systemd-modules-load.service systemd-udevd.service dev-uinput.device
+Requires=systemd-udevd.service
+
+[Service]
+Type=simple
+# Ensure uinput is loaded even on first boot after install (redundant with the
+# /etc/modules-load.d entry the installer drops, but cheap and correct).
+ExecStartPre=/sbin/modprobe uinput
+ExecStart=/usr/bin/python3 /opt/flow-state/autoscrolld.py
+Restart=on-failure
+RestartSec=2
+User=root
+Nice=-5
+# Hardening. This daemon needs raw input access so many isolators must stay
+# off, but we can still block a lot.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+# Narrow device access to just what the daemon touches. `char-input` covers
+# every /dev/input/event*; explicit /dev/uinput is added so writes land there
+# too even with DevicePolicy=closed.
+DevicePolicy=closed
+DeviceAllow=/dev/uinput rw
+DeviceAllow=char-input r
+# Watchdog: if the main loop hangs, systemd restarts us. The current daemon
+# does not call sd_notify, so this fires purely on process livelock (SIGKILL
+# after WatchdogSec of no restart). Uncomment once sd_notify calls are wired
+# from the loop:
+# WatchdogSec=30s
+
+[Install]
+WantedBy=multi-user.target
