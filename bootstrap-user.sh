@@ -42,4 +42,7 @@ bash "$SCRIPTS/05-branding.sh"
 say "06: first-login welcome"
 bash "$SCRIPTS/06-terminal-welcome.sh"
 
+say "07: per-monitor sleep buttons"
+bash "$SCRIPTS/07-monitor-sleep.sh"
+
 say "user layer complete. Open a fresh terminal and type: dsio"

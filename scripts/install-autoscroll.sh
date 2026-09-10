@@ -42,8 +42,12 @@ cat > /etc/udev/rules.d/70-flow-state-autoscroll.rules <<'EOF'
 # When any mouse-like input event device appears, ask systemd to restart the
 # autoscroll daemon so it grabs the newcomer. Uses --no-block so udev does not
 # stall waiting on the restart.
+#
+# IMPORTANT: exclude the daemon's own virtual device — matching it would
+# trigger a restart-storm every time the daemon starts and re-creates its
+# uinput mouse.
 ACTION=="add|remove", KERNEL=="event[0-9]*", SUBSYSTEM=="input", \
-  ENV{ID_INPUT_MOUSE}=="1", \
+  ENV{ID_INPUT_MOUSE}=="1", ATTRS{name}!="flow-state-autoscroll", \
   RUN+="/bin/systemctl --no-block try-restart flow-state-autoscroll.service"
 EOF
 udevadm control --reload-rules || true

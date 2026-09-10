@@ -25,12 +25,11 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictRealtime=true
-# Narrow device access to just what the daemon touches. `char-input` covers
-# every /dev/input/event*; explicit /dev/uinput is added so writes land there
-# too even with DevicePolicy=closed.
-DevicePolicy=closed
-DeviceAllow=/dev/uinput rw
-DeviceAllow=char-input r
+# DevicePolicy=closed with DeviceAllow=char-input in v1 blocked /dev/input
+# reads even for root (the tag/systemd version match on Noble did not admit
+# them). Leave device access as the systemd default; the daemon only reads
+# /dev/input/event* and writes /dev/uinput, and the rest of the isolators
+# (ProtectSystem/ProtectHome/PrivateTmp/etc.) still apply.
 # Watchdog: if the main loop hangs, systemd restarts us. The current daemon
 # does not call sd_notify, so this fires purely on process livelock (SIGKILL
 # after WatchdogSec of no restart). Uncomment once sd_notify calls are wired
