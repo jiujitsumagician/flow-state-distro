@@ -29,11 +29,64 @@ DEBIAN_FRONTEND=noninteractive apt-get purge -y \
 
 # 2. Nuke any leftover wallpaper files that come from other packages.
 say "removing stray wallpaper files under /usr/share/backgrounds/"
+# The `ubuntu-wallpapers` purge may have removed the directory entirely.
+# Recreate it so subsequent steps have a stable target, then clean it.
+install -d -m 0755 /usr/share/backgrounds
 find /usr/share/backgrounds -maxdepth 1 -type f \
   \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" \) \
-  ! -path '*/flow-state/*' -delete
+  ! -path '*/flow-state/*' -delete 2>/dev/null || true
 # Delete every Ubuntu wallpaper subdirectory (warty-final-ubuntu, noble, etc.)
 find /usr/share/backgrounds -maxdepth 1 -type d ! -name flow-state ! -name backgrounds -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+
+# 2b. Install the Flow State wallpapers system-wide (05-branding.sh's
+# system half). During an ISO build no user session exists, so the
+# system layer is where wallpapers must land.
+BRAND_WPS=""
+for candidate in /opt/flow-state-distro/branding/wallpapers \
+                 /home/*/flow-state-distro/branding/wallpapers; do
+  if [[ -d "$candidate" ]]; then BRAND_WPS="$candidate"; break; fi
+done
+if [[ -n "$BRAND_WPS" ]]; then
+  install -d -m 0755 /usr/share/backgrounds/flow-state
+  for w in "$BRAND_WPS"/*.jpg "$BRAND_WPS"/*.png; do
+    [[ -f "$w" ]] || continue
+    install -m 0644 "$w" /usr/share/backgrounds/flow-state/
+  done
+  install -d -m 0755 /usr/share/gnome-background-properties
+  cat > /usr/share/gnome-background-properties/flow-state-wallpapers.xml <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE wallpapers SYSTEM "gnome-wp-list.dtd">
+<wallpapers>
+  <wallpaper><name>Flow State — Stripe</name><filename>/usr/share/backgrounds/flow-state/flow-state-stripe.png</filename><options>zoom</options><pcolor>#050505</pcolor><scolor>#050505</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Horizon</name><filename>/usr/share/backgrounds/flow-state/flow-state-horizon.png</filename><options>zoom</options><pcolor>#0a0a0a</pcolor><scolor>#0a0a0a</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Crystal</name><filename>/usr/share/backgrounds/flow-state/flow-state-crystal.png</filename><options>zoom</options><pcolor>#1a1a1a</pcolor><scolor>#1a1a1a</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Glass</name><filename>/usr/share/backgrounds/flow-state/flow-state-glass.png</filename><options>zoom</options><pcolor>#c8c8c8</pcolor><scolor>#c8c8c8</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Grid</name><filename>/usr/share/backgrounds/flow-state/flow-state-grid.png</filename><options>zoom</options><pcolor>#080808</pcolor><scolor>#080808</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Drift</name><filename>/usr/share/backgrounds/flow-state/flow-state-drift.png</filename><options>zoom</options><pcolor>#0d0d0d</pcolor><scolor>#0d0d0d</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Aurora</name><filename>/usr/share/backgrounds/flow-state/flow-state-aurora.jpg</filename><options>zoom</options><pcolor>#0b1d3f</pcolor><scolor>#0b1d3f</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Nebula</name><filename>/usr/share/backgrounds/flow-state/flow-state-nebula.jpg</filename><options>zoom</options><pcolor>#2b0a3f</pcolor><scolor>#2b0a3f</scolor><shade_type>solid</shade_type></wallpaper>
+  <wallpaper><name>Flow State — Ember</name><filename>/usr/share/backgrounds/flow-state/flow-state-ember.jpg</filename><options>zoom</options><pcolor>#3f0b18</pcolor><scolor>#3f0b18</scolor><shade_type>solid</shade_type></wallpaper>
+</wallpapers>
+XML
+
+  # Also make Stripe the system-wide default wallpaper via a gschema
+  # override, so every new user gets Flow State on first login.
+  install -d -m 0755 /usr/share/glib-2.0/schemas
+  cat > /usr/share/glib-2.0/schemas/90-flow-state-defaults.gschema.override <<'OVR'
+[org.gnome.desktop.background]
+picture-uri='file:///usr/share/backgrounds/flow-state/flow-state-stripe.png'
+picture-uri-dark='file:///usr/share/backgrounds/flow-state/flow-state-stripe.png'
+picture-options='zoom'
+
+[org.gnome.desktop.screensaver]
+picture-uri='file:///usr/share/backgrounds/flow-state/flow-state-stripe.png'
+
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'
+accent-color='blue'
+OVR
+  glib-compile-schemas /usr/share/glib-2.0/schemas 2>&1 | head -1 || true
+fi
 
 # 3. Remove every non-Flow-State gnome-background-properties XML so the
 # picker only shows Flow State.
