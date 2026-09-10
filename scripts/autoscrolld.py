@@ -59,12 +59,12 @@ TAP_MAX_PX = 5                  # under this many px of motion is a normal middl
 
 GLIDE_TICK_SECONDS = 0.03       # how often we emit scroll notches while gliding.
 DEADZONE_PX = 8                 # motion inside ±DEADZONE_PX from the anchor doesn't scroll.
-V_POWER = 1.8                   # acceleration curve exponent (>1 = slow start, faster far away)
-H_POWER = 1.6                   # slightly gentler curve for horizontal.
-V_SCALE = 40.0                  # dividing constant: raise → slower overall.
-H_SCALE = 55.0
-V_MAX_NOTCHES_PER_SEC = 220.0   # top scroll speed (vertical), notches per second.
-H_MAX_NOTCHES_PER_SEC = 140.0   # top scroll speed (horizontal).
+V_POWER = 1.7                   # acceleration curve exponent (>1 = slow start, faster far away)
+H_POWER = 1.5                   # slightly gentler curve for horizontal.
+V_SCALE = 15.0                  # dividing constant: raise → slower overall.
+H_SCALE = 25.0
+V_MAX_NOTCHES_PER_SEC = 260.0   # top scroll speed (vertical), notches per second.
+H_MAX_NOTCHES_PER_SEC = 160.0   # top scroll speed (horizontal).
 HI_RES_STEP = 120               # standard REL_*_HI_RES step size per notch.
 
 LOG_PREFIX = "flow-state-autoscroll:"
