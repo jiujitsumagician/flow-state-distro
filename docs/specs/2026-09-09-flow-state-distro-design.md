@@ -270,8 +270,26 @@ into the scripted build. Cubic is not the release build tool.
   `/etc/default/grub` `GRUB_THEME=`.
 - GDM logo/background via `/etc/dconf/db/gdm.d/00-flow-state`.
 
-**ISO output:** `flow-state-1.0-amd64.iso`, hosted (Phase 2.5) at
-`dsio.io/download/flow-state-1.0.iso` or a Cloudflare R2 bucket.
+**ISO output:** `flow-state-1.0-amd64.iso`, downloadable directly from
+`dsio.io`. Phase 2.5 wires this up:
+
+- Landing page at `dsio.io/flow-state` — screenshot of Aurora wallpaper,
+  30-second pitch (Ubuntu + DSIO harness + system-wide autoscroll +
+  per-monitor sleep + Claude/Codex tray), "Download" CTA.
+- `dsio.io/download/flow-state-<version>-amd64.iso` — direct download
+  URL, stable per-version. Latest also aliased at
+  `dsio.io/download/flow-state-latest.iso`.
+- `dsio.io/download/flow-state-<version>.sha256` — checksum file next
+  to the ISO.
+- `dsio.io/download/flow-state-<version>.sig` — detached GPG signature
+  by Will's key (public key at `dsio.io/keys/flow-state-signing.asc`).
+- Storage backend: Cloudflare R2 (or an equivalent object store with
+  cheap egress). The Vercel site that already lives at dsio.io points
+  the download URLs at the R2 bucket via a signed rewrite or a plain
+  302, so paying-per-GB S3 egress is not the shape.
+- Release cadence: whenever Flow State bumps a minor. Old versions stay
+  reachable at their versioned URLs so a specific build is always
+  installable.
 
 **Signing / integrity:** SHA256SUMS + a detached GPG signature with Will's
 key. Not code-signed for Secure Boot in v1 — users installing this will
@@ -280,19 +298,47 @@ shim-signed Secure Boot support later if it matters.
 
 ## 6. Branding pass
 
-- **Logo:** `jiujitsumagician/flowstate/public/flowstate-logo.png` (500x500
-  RGBA), copied to `branding/flowstate-logo.png`. Vectorize into an SVG
-  for scaling if we don't already have one; ImageMagick + `potrace` can
-  do a first pass.
-- **Accent color:** DSIO's brand blue is `#3D8FD4` / deep `#185FA5`. Flow
-  State can share this palette or pick its own hue — sample directly from
-  the flowstate logo before ISO build.
-- **Wallpaper:** 1440p + 4K, generated at Phase 1 branding step via
-  ImageMagick: logo centered on a Flow-State-blue gradient. Bespoke art
-  later.
-- **Distro name string:** "Flow State" everywhere the user sees the OS
-  name (`lsb_release -d` → `Flow State 1.0 (Noble Numbat remix)`). See
-  the caveat in §5 about `ID=ubuntu`.
+**Visual identity (canonical, as of 2026-09-10):**
+
+- **Wordmark & symbol:** the *Penrose triangle* — a red-outlined
+  impossible-triangle silhouette with subtle blue highlight — over the
+  words **FLOW STATE** in a heavy modern sans. Both live in
+  `branding/wallpapers/flow-state-{aurora,nebula,ember}.jpg` as the
+  intended presentation (the Penrose mark centered, the wordmark
+  underneath, energy field behind).
+- **Three official desktop backgrounds**, all 1280×720 source (upscale
+  to 1440p/4K for the ISO):
+  - `flow-state-aurora.jpg` — blue/teal cosmic (default; matches the
+    calmer "focus" mood of the name).
+  - `flow-state-nebula.jpg` — pink/purple/blue nebula.
+  - `flow-state-ember.jpg` — orange/red/pink fire.
+- **Wallpaper install path (system):**
+  `/usr/share/backgrounds/flow-state/*.jpg`, registered for GNOME's
+  Backgrounds picker via
+  `/usr/share/gnome-background-properties/flow-state-wallpapers.xml`.
+  This makes them show up alongside the stock Ubuntu wallpapers in
+  Settings → Appearance → Background for every user on the machine.
+- **Default active wallpaper for a new user:** `flow-state-aurora.jpg`.
+- **Accent color:** GNOME `accent-color=blue`. Sample directly from the
+  Aurora background (`#0b1d3f` deep, `#2a5fa4` mid) for anywhere that
+  needs an exact hex — Plymouth boot splash, GRUB theme, GDM
+  background, etc.
+- **Icon everywhere else:** extract the Penrose logo from
+  `flow-state-aurora.jpg` (crop → transparent PNG) and use it for the
+  application/tray icon (`flow-state-tray`), the GDM user avatar
+  (`~/.face`), and any other place a small square icon is asked for.
+
+**Rebrand every user-facing surface** (per Will's explicit request):
+
+- Grub boot menu (theme in `/boot/grub/themes/flow-state/`).
+- Plymouth boot splash (`/usr/share/plymouth/themes/flow-state/`).
+- GDM login screen (`/etc/dconf/db/gdm.d/00-flow-state`).
+- Ubuntu installer (Ubiquity/subiquity slideshow — replace the Ubuntu
+  slides with a Flow State walkthrough naming the harness and the
+  autoscroll/monitor-sleep/tray features).
+- `/etc/issue`, `/etc/motd`, first-login welcome banner.
+- Distro name string: `PRETTY_NAME="Flow State 1.0 (Noble Numbat remix)"`
+  everywhere `os-release` is read. (Keep `ID=ubuntu` — see §5.)
 - **Terminal:** GNOME Terminal remains default. A `flow-state-blue`
   gschema color profile ships as the default so a fresh terminal opens
   in Flow State colors.
