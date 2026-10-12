@@ -25,8 +25,13 @@ if [[ $EUID -eq 0 ]]; then
 
   # KDE Connect uses TCP+UDP 1714-1764 for discovery + pairing.
   if command -v ufw >/dev/null 2>&1 && ufw status >/dev/null 2>&1; then
-    ufw allow 1714:1764/tcp comment "GSConnect / KDE Connect" 2>&1 | tail -1
-    ufw allow 1714:1764/udp comment "GSConnect / KDE Connect" 2>&1 | tail -1
+    # Only from private / link-local ranges (home, office and phone-hotspot
+    # LANs), never from arbitrary public-Wi-Fi peers.
+    for cidr in 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 fe80::/10; do
+      for proto in tcp udp; do
+        ufw allow from "$cidr" to any port 1714:1764 proto "$proto" comment "GSConnect / KDE Connect" 2>&1 | tail -1
+      done
+    done
   fi
 
   # System-wide default: enable GSConnect + AppIndicators via dconf so
