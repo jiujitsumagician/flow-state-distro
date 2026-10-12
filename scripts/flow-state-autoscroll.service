@@ -6,9 +6,10 @@ Requires=systemd-udevd.service
 
 [Service]
 Type=simple
-# Ensure uinput is loaded even on first boot after install (redundant with the
-# /etc/modules-load.d entry the installer drops, but cheap and correct).
-ExecStartPre=/sbin/modprobe uinput
+# uinput is loaded at boot via /etc/modules-load.d/flow-state-autoscroll.conf
+# (and modprobe'd once by install-autoscroll.sh). There is deliberately no
+# ExecStartPre=modprobe here: loading a module needs CAP_SYS_MODULE and the
+# @module syscalls, both of which the hardening below removes.
 ExecStart=/usr/bin/python3 /opt/flow-state/autoscrolld.py
 Restart=on-failure
 RestartSec=2
@@ -25,6 +26,23 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictRealtime=true
+# Extra confinement (defense in depth against a bug in python-evdev / HID
+# parsing driven by a hostile USB device). The daemon only talks to
+# /dev/input/event* and /dev/uinput: no network, no namespaces, no clock.
+# NOTE: ProtectClock= is intentionally NOT set. It adds an implicit DeviceAllow
+# for /dev/rtc, which flips the device policy to an allow-list and would block
+# /dev/input (the same failure the DevicePolicy comment below describes).
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+ProtectHostname=true
+ProtectProc=invisible
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# CAP_SYS_NICE is kept for Nice=-5 above; everything else is dropped. Device
+# access works through root ownership of /dev/input/event* and /dev/uinput.
+CapabilityBoundingSet=CAP_SYS_NICE
 # DevicePolicy=closed with DeviceAllow=char-input in v1 blocked /dev/input
 # reads even for root (the tag/systemd version match on Noble did not admit
 # them). Leave device access as the systemd default; the daemon only reads
