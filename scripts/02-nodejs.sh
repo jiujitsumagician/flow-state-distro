@@ -4,6 +4,11 @@
 # below 22, otherwise we leave the system Node alone.
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUDO="${SUDO-sudo}"
+# shellcheck source=scripts/lib/pinned-install.sh
+source "$HERE/lib/pinned-install.sh"
+
 need_install() {
   if ! command -v node >/dev/null 2>&1; then return 0; fi
   local ver
@@ -14,8 +19,8 @@ need_install() {
 
 if need_install; then
   echo "  installing Node 24 LTS from NodeSource"
-  curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+  # Signed apt repo with a fingerprint-checked key (no curl | sudo bash).
+  fs_install_nodesource 24
 else
   echo "  Node $(node -v) already present; leaving it alone"
 fi

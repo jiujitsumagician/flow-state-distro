@@ -13,10 +13,22 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Pinned third-party versions. Bump deliberately (and re-test an install/ISO
+# build) rather than tracking "latest" as root. Override via the environment.
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.296}"
+CODEX_VERSION="${CODEX_VERSION:-0.162.1}"
+OLLAMA_VERSION="${OLLAMA_VERSION:-0.40.3}"
+# SHA-256 of https://ollama.com/install.sh as reviewed for the version above.
+OLLAMA_INSTALL_SHA256="${OLLAMA_INSTALL_SHA256:-25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f}"
+
 if [[ $EUID -ne 0 ]]; then
   echo "bootstrap-system.sh must run as root. Try: sudo bash $0" >&2
   exit 1
 fi
+
+SUDO=""   # already root; scripts/lib/pinned-install.sh prefixes privileged commands with this
+# shellcheck source=scripts/lib/pinned-install.sh
+source "$HERE/scripts/lib/pinned-install.sh"
 
 BLUE=$'\033[38;2;24;95;165m'; RESET=$'\033[0m'
 say() { printf '%s==>%s %s\n' "$BLUE" "$RESET" "$*"; }
@@ -44,14 +56,8 @@ apt-get install -y \
 # gh: needed later by the user-scope script to clone the private DSIO repo.
 if ! command -v gh >/dev/null 2>&1; then
   say "01: adding cli.github.com apt source and installing gh"
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
-  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    > /etc/apt/sources.list.d/github-cli.list
-  apt-get update -qq
-  apt-get install -y gh
+  # Keyring is fingerprint-checked before apt is allowed to trust it.
+  fs_install_gh
 fi
 
 # Node 24 from NodeSource, but only if the system Node is older than 22.
@@ -62,25 +68,31 @@ need_node() {
 }
 if need_node; then
   say "02: installing Node 24 LTS from NodeSource"
-  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
-  apt-get install -y nodejs
+  # Signed apt repo with a fingerprint-checked key (no curl | bash).
+  fs_install_nodesource 24
 else
   say "02: node $(node -v) already present"
 fi
 
-# Global npm CLIs.
-for pkg in "@anthropic-ai/claude-code" "@openai/codex"; do
-  name="${pkg##*/}"
-  if ! command -v "$name" >/dev/null 2>&1; then
-    say "02: npm i -g $pkg"
-    npm install -g "$pkg" >/dev/null
-  fi
-done
+# Global npm CLIs, pinned to exact versions. @openai/codex has no install
+# scripts, so they are disabled for it. @anthropic-ai/claude-code needs its
+# postinstall step (it links the native binary), so scripts stay enabled there.
+if ! command -v claude >/dev/null 2>&1; then
+  say "02: npm i -g @anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+  npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null
+fi
+if ! command -v codex >/dev/null 2>&1; then
+  say "02: npm i -g @openai/codex@$CODEX_VERSION"
+  npm install -g --ignore-scripts "@openai/codex@$CODEX_VERSION" >/dev/null
+fi
 
 # Ollama service, optional but recommended.
 if ! command -v ollama >/dev/null 2>&1; then
   say "05: installing Ollama"
-  curl -fsSL https://ollama.com/install.sh | sh
+  # Installer is hash-pinned and run pinned to OLLAMA_VERSION; on mismatch it
+  # is NOT executed (optional component: warn and continue).
+  fs_install_ollama "$OLLAMA_VERSION" "$OLLAMA_INSTALL_SHA256" \
+    || echo "  (Ollama install skipped; see message above)"
 fi
 
 # Middle-click autoscroll: use the installer script for now. Phase 1.5
