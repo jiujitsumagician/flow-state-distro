@@ -11,8 +11,11 @@ install -d -m 0755 "$HOME/.local/bin"
 install -m 0755 "$HERE/flow-state-browser" "$HOME/.local/bin/flow-state-browser"
 
 install -d -m 0755 "$HOME/.local/share/applications"
-install -m 0644 "$HERE/flow-state-browser.desktop" \
-                "$HOME/.local/share/applications/flow-state-browser.desktop"
+# The shipped .desktop file uses the author's home path; point it at the
+# installing user's $HOME instead.
+sed "s|/home/will/.local/bin|$HOME/.local/bin|g" "$HERE/flow-state-browser.desktop" \
+  > "$HOME/.local/share/applications/flow-state-browser.desktop"
+chmod 0644 "$HOME/.local/share/applications/flow-state-browser.desktop"
 update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
 
 # Ensure google-chrome is installed; if not, offer to install it via Google's

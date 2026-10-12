@@ -42,8 +42,11 @@ find /usr/share/backgrounds -maxdepth 1 -type d ! -name flow-state ! -name backg
 # system half). During an ISO build no user session exists, so the
 # system layer is where wallpapers must land.
 BRAND_WPS=""
+# Only trust the installed copy or this script's own checkout; never pick up
+# images from arbitrary users' home directories.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for candidate in /opt/flow-state-distro/branding/wallpapers \
-                 /home/*/flow-state-distro/branding/wallpapers; do
+                 "$SELF_DIR/../branding/wallpapers"; do
   if [[ -d "$candidate" ]]; then BRAND_WPS="$candidate"; break; fi
 done
 if [[ -n "$BRAND_WPS" ]]; then

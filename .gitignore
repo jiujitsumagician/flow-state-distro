@@ -5,6 +5,15 @@ node_modules/
 __pycache__/
 *.pyc
 
+# Secrets / key material: never commit, never ship in the ISO
+.env
+.env.*
+*.pem
+*.key
+*.p12
+id_rsa*
+*.secret
+
 # ISO build workspace — never committed
 iso/cache/
 iso/build/

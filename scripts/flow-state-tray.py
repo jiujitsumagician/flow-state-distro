@@ -47,6 +47,8 @@ POLL_SECONDS = 15
 # ---- ProtonVPN toggle helpers ------------------------------------------
 def _which(cmd: str) -> str | None:
     for p in os.environ.get("PATH", "").split(":"):
+        if not p:
+            continue  # empty PATH entry means cwd; never resolve binaries from there
         full = os.path.join(p, cmd)
         if os.access(full, os.X_OK):
             return full

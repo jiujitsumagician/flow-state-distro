@@ -25,7 +25,19 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 VERSION="${FLOW_STATE_VERSION:-0.1}"
-UBUNTU_ISO_URL="${UBUNTU_ISO_URL:-https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-desktop-amd64.iso}"
+DEFAULT_UBUNTU_ISO_URL="https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-desktop-amd64.iso"
+UBUNTU_ISO_URL="${UBUNTU_ISO_URL:-$DEFAULT_UBUNTU_ISO_URL}"
+# A different download URL means a different file, so the pinned default
+# hash below cannot apply: the caller must supply the matching hash.
+if [[ "$UBUNTU_ISO_URL" != "$DEFAULT_UBUNTU_ISO_URL" && -z "${UBUNTU_ISO_SHA256:-}" ]]; then
+  echo "UBUNTU_ISO_URL is overridden: also set UBUNTU_ISO_SHA256 to the SHA-256 of that ISO (see the release's SHA256SUMS)." >&2
+  exit 1
+fi
+# Pinned SHA-256 of the upstream base ISO. Source: Canonical's
+# https://releases.ubuntu.com/24.04.4/SHA256SUMS (GPG-verified against
+# SHA256SUMS.gpg, key 843938DF228D22F7B3742BC0D94AA3F0EFE21092).
+# Override with UBUNTU_ISO_SHA256 when bumping the base image.
+UBUNTU_ISO_SHA256="${UBUNTU_ISO_SHA256:-3a4c9877b483ab46d7c3fbe165a0db275e1ae3cfe56a5657e5a47c2f99a99d1e}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
@@ -35,6 +47,12 @@ UBUNTU_ISO="$CACHE/ubuntu-24.04.4-desktop-amd64.iso"
 ISO_MOUNT="$WORK/iso-mount"
 ISO_ROOT="$WORK/iso-root"
 CHROOT="$WORK/rootfs"
+# Safety: every rm -rf below is aimed at $WORK / $CHROOT. Refuse to run if
+# the build tree is not exactly <repo>/iso/build.
+if [[ "$WORK" != "$REPO/iso/build" ]]; then
+  echo "refusing to continue: unexpected build dir '$WORK' (expected '$REPO/iso/build')" >&2
+  exit 1
+fi
 OUT_ISO="$WORK/flow-state-${VERSION}-amd64.iso"
 
 BLUE='\033[38;2;255;40;40m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -67,11 +85,30 @@ purge_work_mounts() {
   done
 }
 
+# Refuse to continue (rather than rm -rf through a live bind mount) if any
+# mount is still present at or under the given directory. Lists every mount
+# on the host and filters by path prefix, so it works even when the
+# directory itself is not a mount point.
+assert_no_mounts_under() {
+  local dir="$1" mp w found="" esc_space='\x20'
+  w="${dir// /$esc_space}"   # findmnt -r prints spaces as \x20
+  while IFS= read -r mp; do
+    if [[ "$mp" == "$w" || "$mp" == "$w"/* ]]; then found+="$mp"$'\n'; fi
+  done < <(findmnt -rn -o TARGET 2>/dev/null)
+  if [[ -n "$found" ]]; then
+    echo "refusing to continue: mounts still present under $dir:" >&2
+    printf '%s' "$found" >&2
+    echo "unmount them (umount -R) and re-run." >&2
+    exit 1
+  fi
+}
+
 purge_work_mounts
+assert_no_mounts_under "$WORK"
 
 if [[ "${1:-}" == "--clean" ]]; then
   say "clean: removing $WORK"
-  rm -rf "$WORK"
+  rm -rf --one-file-system "$WORK"
 fi
 mkdir -p "$CACHE" "$WORK" "$ISO_ROOT" "$ISO_MOUNT" "$CHROOT"
 
@@ -94,6 +131,14 @@ if [[ ! -f "$UBUNTU_ISO" ]]; then
   wget --show-progress -c -O "$UBUNTU_ISO.part" "$UBUNTU_ISO_URL"
   mv "$UBUNTU_ISO.part" "$UBUNTU_ISO"
 fi
+# Verify the base image (fresh download OR cached file) against the pinned
+# SHA-256 before it is mounted. A mismatch deletes the file and aborts.
+say "verifying base ISO checksum"
+echo "$UBUNTU_ISO_SHA256  $UBUNTU_ISO" | sha256sum -c - || {
+  echo "base ISO checksum mismatch" >&2
+  rm -f "$UBUNTU_ISO" "$UBUNTU_ISO.part"
+  exit 1
+}
 
 # --- 2. Extract the ISO to iso-root -------------------------------------
 say "extracting ISO to $ISO_ROOT"
@@ -105,7 +150,8 @@ rsync -aH --exclude='*.squashfs' "$ISO_MOUNT/casper/" "$ISO_ROOT/casper/"
 
 # --- 3. Merge all squashfs layers into one rootfs -----------------------
 say "unsquashing layered filesystem (this takes 5–10 min)"
-rm -rf "$CHROOT"
+assert_no_mounts_under "$CHROOT"
+rm -rf --one-file-system "$CHROOT"
 LAYERS=()
 # Ubuntu 24.04 desktop ships a base + standard + language layer chain.
 # The English language layer's hardlinks collide with minimal.squashfs's
@@ -135,7 +181,15 @@ umount "$ISO_MOUNT"
 
 # --- 4. Copy Flow State repo into chroot for the system layer -----------
 mkdir -p "$CHROOT/opt/flow-state-distro"
-rsync -a --exclude='.git' --exclude='iso/build' --exclude='iso/cache' \
+# - root-owned and not group/world-writable: root-run scripts are later
+#   executed from here, so a regular user must not be able to edit them.
+# - never ship untracked/ignored files or secret-looking files from the
+#   builder's checkout (rsync does not read .gitignore unless told to).
+rsync -a --chown=root:root --chmod=Dgo-w,Fgo-w \
+  --filter=':- .gitignore' \
+  --exclude='.git' --exclude='iso/build' --exclude='iso/cache' \
+  --exclude='.env*' --exclude='*.pem' --exclude='*.key' --exclude='*.log' \
+  --exclude='__pycache__' \
   "$REPO/" "$CHROOT/opt/flow-state-distro/"
 
 # --- 5. Bind-mount runtime inside the chroot ---------------------------

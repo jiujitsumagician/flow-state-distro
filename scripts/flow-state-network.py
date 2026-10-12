@@ -39,6 +39,8 @@ SPEEDTEST_TIMEOUT = 90
 # ---- ProtonVPN toggle helpers ------------------------------------------
 def _which(cmd: str) -> str | None:
     for p in os.environ.get("PATH", "").split(":"):
+        if not p:
+            continue  # empty PATH entry means cwd; never resolve binaries from there
         full = os.path.join(p, cmd)
         if os.access(full, os.X_OK):
             return full
@@ -75,7 +77,7 @@ def vpn_toggle() -> None:
         subprocess.Popen([
             "notify-send", "-u", "critical",
             "Flow State VPN",
-            "ProtonVPN is not installed yet. Run:\n  sudo bash /home/will/flow-state-distro/scripts/10-vpn.sh",
+            "ProtonVPN is not installed yet. Run:\n  sudo bash /opt/flow-state-distro/scripts/10-vpn.sh (or scripts/10-vpn.sh from your flow-state-distro checkout)",
         ])
         return
     if state["backend"] == "protonvpn":
@@ -322,7 +324,9 @@ class DetailWindow(Gtk.Window):
             row = Gtk.Label(xalign=0, selectable=True)
             ipv4 = iface["ipv4"] or "(no IPv4)"
             row.set_markup(
-                f"<b>{iface['name']}</b>   MAC {iface['mac']}   {ipv4}"
+                f"<b>{GLib.markup_escape_text(iface['name'])}</b>   "
+                f"MAC {GLib.markup_escape_text(iface['mac'])}   "
+                f"{GLib.markup_escape_text(ipv4)}"
             )
             self.ifaces_box.pack_start(row, False, False, 0)
         self.ifaces_box.show_all()

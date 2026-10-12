@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flow State autoscroll — one-shot installer.
 #
-#     sudo bash /home/will/flow-state-distro/scripts/install-autoscroll.sh
+#     sudo bash scripts/install-autoscroll.sh
 #
 # 1. apt-installs python3-evdev
 # 2. Ensures the uinput kernel module is loaded now AND on every boot
